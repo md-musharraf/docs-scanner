@@ -248,7 +248,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   };
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto space-y-4 pb-20 md:pb-6">
+    <div className="flex flex-col h-full max-w-4xl mx-auto space-y-4 pb-28 md:pb-6">
       {/* Top Controls & Document Name Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md">
         <div className="flex items-center space-x-2 flex-1 min-w-[180px]">

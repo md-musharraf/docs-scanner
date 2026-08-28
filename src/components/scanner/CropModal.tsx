@@ -314,21 +314,21 @@ export const CropModal: React.FC<CropModalProps> = ({
   if (!isOpen || !imageSrc) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-2xl animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-2xl animate-in fade-in duration-200 h-[100dvh] overflow-hidden">
       {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 pt-[max(env(safe-area-inset-top),12px)]">
-        <div className="flex items-center space-x-2">
+      <div className="flex items-center justify-between px-3 py-2 sm:px-4 sm:py-3 border-b border-slate-800 bg-slate-900/90 pt-[max(env(safe-area-inset-top),10px)] flex-shrink-0">
+        <div className="flex items-center space-x-2 min-w-0">
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer flex-shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-              Auto-Cut & Light Adjust <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">AI</span>
+          <div className="min-w-0">
+            <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 truncate">
+              Auto-Cut & Enhance <span className="text-[9px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">AI</span>
             </h3>
-            <p className="text-[11px] text-slate-400">Drag 4 corner handles to adjust boundary</p>
+            <p className="text-[10px] text-slate-400 truncate">Drag corners to adjust boundary</p>
           </div>
         </div>
 
@@ -336,14 +336,14 @@ export const CropModal: React.FC<CropModalProps> = ({
         <button
           onClick={handleConfirm}
           disabled={isProcessing}
-          className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+          className="flex items-center space-x-1 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0"
         >
           {isProcessing ? (
             <span>Processing...</span>
           ) : (
             <>
               <Check className="w-4 h-4" />
-              <span>Done & Cut</span>
+              <span>Apply</span>
             </>
           )}
         </button>
@@ -352,11 +352,11 @@ export const CropModal: React.FC<CropModalProps> = ({
       {/* Main Image Crop Canvas Area */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-hidden relative flex items-center justify-center p-4 select-none touch-none"
+        className="flex-1 min-h-0 overflow-hidden relative flex items-center justify-center p-2 sm:p-4 select-none touch-none"
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       >
-        <div className="relative max-w-full max-h-[58vh] inline-block">
+        <div className="relative max-w-full max-h-[48vh] sm:max-h-[58vh] inline-block">
           <img
             ref={imageRef}
             src={imageSrc}
@@ -373,7 +373,7 @@ export const CropModal: React.FC<CropModalProps> = ({
               }
             }}
             style={{ transform: `rotate(${rotationAngle}deg)` }}
-            className="max-w-full max-h-[58vh] object-contain rounded-xl shadow-2xl transition-transform duration-200"
+            className="max-w-full max-h-[48vh] sm:max-h-[58vh] object-contain rounded-xl shadow-2xl transition-transform duration-200"
           />
 
           {/* Draggable 4-Corner Overlay */}

@@ -123,7 +123,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20 md:pb-8 animate-in fade-in duration-300">
+    <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
       {/* Header Banner */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
         <div className="flex items-center space-x-3 mb-2">

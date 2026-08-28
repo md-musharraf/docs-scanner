@@ -11,36 +11,47 @@
   html {
     -webkit-text-size-adjust: 100%;
     touch-action: manipulation;
+    height: 100%;
   }
 
   body {
-    @apply bg-slate-900 text-slate-100 antialiased font-sans select-none;
+    @apply bg-slate-950 text-slate-100 antialiased font-sans select-none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
     overscroll-behavior-y: none;
   }
 
-  button, input, select {
+  button, input, select, textarea {
     touch-action: manipulation;
   }
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: rgba(148, 163, 184, 0.2);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(148, 163, 184, 0.4);
+}
+
+/* Utility to hide scrollbar on mobile horizontal bars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Pulse Glow & animations */

@@ -234,7 +234,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   const hasAnyResults = images.some((img) => !!img.result);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20 md:pb-8 animate-in fade-in duration-300">
+    <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
       {/* Header Banner */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
         <div className="flex items-center space-x-3 mb-2">
@@ -332,18 +332,21 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 </div>
 
                 {/* Custom Input */}
-                <div className="flex items-center space-x-2 pt-1">
-                  <span className="text-xs text-slate-400">Custom Target (KB):</span>
-                  <input
-                    type="number"
-                    min="5"
-                    max="10000"
-                    value={customTargetInput}
-                    onChange={(e) => handleCustomTargetChange(e.target.value)}
-                    className="w-24 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-1.5 rounded-xl focus:outline-none focus:border-amber-500"
-                  />
-                  <span className="text-[11px] text-slate-500">
-                    (e.g., 10 for job portals, 100 for identity cards)
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs text-slate-400">Custom Target:</span>
+                  <div className="flex items-center space-x-1.5">
+                    <input
+                      type="number"
+                      min="5"
+                      max="10000"
+                      value={customTargetInput}
+                      onChange={(e) => handleCustomTargetChange(e.target.value)}
+                      className="w-20 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-xl focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-xs font-bold text-slate-300">KB</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    (e.g., 10 for job portals, 100 for ID cards)
                   </span>
                 </div>
               </div>
@@ -400,7 +403,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
             <button
               onClick={handleCompressAll}
               disabled={isProcessingAll}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-sm shadow-xl shadow-amber-600/30 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-amber-600/30 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
             >
               {isProcessingAll ? (
                 <div className="flex items-center space-x-2">
@@ -420,11 +423,11 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
 
           {/* Stats Bar */}
           {hasAnyResults && (
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-3.5 rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-3.5 rounded-2xl">
               <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>
-                  Total Reduced: {formatFileSize(totalOriginalBytes)} ➔{' '}
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                <span className="break-all">
+                  Reduced: {formatFileSize(totalOriginalBytes)} ➔{' '}
                   {formatFileSize(totalCompressedBytes)} (
                   {Math.round(
                     ((totalOriginalBytes - totalCompressedBytes) / totalOriginalBytes) * 100
@@ -434,11 +437,11 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
               </div>
 
               {/* Batch Export Options */}
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 w-full sm:w-auto">
                 <button
                   onClick={handleDownloadZip}
                   disabled={isZipping}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer"
                 >
                   <Archive className="w-3.5 h-3.5" />
                   <span>{isZipping ? 'Zipping...' : 'Download ZIP'}</span>
@@ -447,7 +450,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 <button
                   onClick={handleSaveToPdf}
                   disabled={isPdfExporting}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-600/30"
+                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-600/30"
                 >
                   <FileStack className="w-3.5 h-3.5" />
                   <span>{isPdfExporting ? 'Saving...' : 'Save as PDF'}</span>

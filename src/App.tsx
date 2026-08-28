@@ -94,7 +94,7 @@ export function AppContent() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 md:p-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 md:p-8 pb-28 md:pb-8">
         {activeTab === 'scan' && (
           <CameraScanner onDocumentSaved={refreshSavedDocs} />
         )}
