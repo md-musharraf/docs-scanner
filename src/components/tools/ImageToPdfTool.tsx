@@ -3,9 +3,12 @@ import { FileStack, ArrowUp, ArrowDown, Trash2, FileCheck } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
 import { imagesToPDF } from '../../lib/pdfEngine';
-import type { ImageToPdfOptions } from '../../lib/pdfEngine';
+import type { ImageToPdfOptions } from '../../core/types';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
+import { generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 interface ImageFileItem {
   id: string;
@@ -20,8 +23,9 @@ interface ImageToPdfToolProps {
 }
 
 export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved }) => {
+  const { showToast } = useToast();
   const [images, setImages] = useState<ImageFileItem[]>([]);
-  const [docName, setDocName] = useState(`Photos_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const [docName, setDocName] = useState(() => generateDefaultDocName('Photos'));
   const [options, setOptions] = useState<ImageToPdfOptions>({
     pageSize: 'a4',
     orientation: 'portrait',
@@ -34,6 +38,11 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
   const handleFilesSelected = (files: File[]) => {
     const imgFiles = files.filter((f) => f.type.startsWith('image/'));
 
+    if (imgFiles.length === 0) {
+      showToast('Please select valid image files (JPG, PNG, WebP)', 'error');
+      return;
+    }
+
     imgFiles.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -41,7 +50,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
         setImages((prev) => [
           ...prev,
           {
-            id: `img_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
             file,
             dataUrl,
             name: file.name,
@@ -51,6 +60,8 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
       };
       reader.readAsDataURL(file);
     });
+
+    showToast(`Added ${imgFiles.length} photo${imgFiles.length > 1 ? 's' : ''}`, 'success');
   };
 
   const moveUp = (index: number) => {
@@ -84,7 +95,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
         options
       );
 
-      const finalName = docName.endsWith('.pdf') ? docName : `${docName}.pdf`;
+      const finalName = ensurePdfExtension(docName, 'Photos');
 
       // Save to offline storage
       await saveDocumentLocally({
@@ -99,14 +110,15 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
 
       setGeneratedPdf(pdfBytes);
       setIsPreviewOpen(true);
+      showToast('PDF created from photos successfully!', 'success');
 
       confetti({
         particleCount: 80,
         spread: 60,
       });
     } catch (err) {
-      console.error('Error creating PDF from images:', err);
-      alert('Error creating PDF.');
+      logger.error('ImageToPdfTool', 'Error creating PDF from images', err);
+      showToast('Error creating PDF from images', 'error');
     } finally {
       setIsGenerating(false);
     }
@@ -286,7 +298,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
         pdfData={generatedPdf}
-        filename={docName}
+        filename={ensurePdfExtension(docName, 'Photos')}
       />
     </div>
   );

@@ -10,24 +10,24 @@ import {
   Crop,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import type { ScannerFilter } from '../../lib/imageFilters';
+import type { ScannerFilter, ScannedPageItem } from '../../core/types';
+import { APP_CONFIG } from '../../core/constants';
+import { generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
 import { imagesToPDF } from '../../lib/pdfEngine';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { CropModal } from './CropModal';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
-export interface ScannedPageItem {
-  id: string;
-  originalDataUrl: string;
-  processedDataUrl: string;
-  filter: ScannerFilter;
-}
+export type { ScannedPageItem };
 
 interface CameraScannerProps {
   onDocumentSaved?: () => void;
 }
 
 export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved }) => {
+  const { showToast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,7 +38,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   const [pages, setPages] = useState<ScannedPageItem[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
-  const [docName, setDocName] = useState(`Scan_${new Date().toISOString().slice(0, 10)}`);
+  const [docName, setDocName] = useState(() => generateDefaultDocName('Scan'));
 
   // Crop & Light Adjustment Modal State
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -50,44 +50,54 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   useEffect(() => {
-    startCamera();
+    let currentStream: MediaStream | null = null;
+    let isActive = true;
+
+    async function initCamera() {
+      try {
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: APP_CONFIG.cameraDefaults.idealWidth, min: APP_CONFIG.cameraDefaults.minWidth },
+            height: { ideal: APP_CONFIG.cameraDefaults.idealHeight, min: APP_CONFIG.cameraDefaults.minHeight },
+          },
+          audio: false,
+        };
+
+        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!isActive) {
+          newStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        currentStream = newStream;
+        setStream(newStream);
+        setHasCameraPermission(true);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = newStream;
+          await videoRef.current.play().catch((err) => {
+            logger.warn('CameraScanner', 'Auto-play prevented or interrupted', err);
+          });
+        }
+      } catch (err) {
+        if (isActive) {
+          logger.warn('CameraScanner', 'Camera stream error / permission denied', err);
+          setHasCameraPermission(false);
+        }
+      }
+    }
+
+    void initCamera();
+
     return () => {
-      stopCamera();
+      isActive = false;
+      if (currentStream) {
+        currentStream.getTracks().forEach((track) => track.stop());
+      }
+      setStream(null);
     };
   }, [facingMode]);
-
-  const startCamera = async () => {
-    stopCamera();
-    try {
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 3840, min: 1280 },
-          height: { ideal: 2160, min: 720 },
-        },
-        audio: false,
-      };
-
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-      setStream(newStream);
-      setHasCameraPermission(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream;
-        await videoRef.current.play();
-      }
-    } catch (err) {
-      console.warn('Camera stream error / no permission:', err);
-      setHasCameraPermission(false);
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
-    }
-  };
 
   const toggleCameraFacing = () => {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
@@ -106,38 +116,44 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
           });
           setTorchOn(nextState);
         } catch (e) {
-          console.error('Torch error:', e);
+          logger.error('CameraScanner', 'Torch control failed', e);
+          showToast('Flashlight not supported on this lens', 'info');
         }
+      } else {
+        showToast('Flashlight not available', 'info');
       }
     }
   };
 
-  // Capture High-Res Snapshot and open Crop & Auto-Light modal
   const handleCapture = async () => {
     if (!videoRef.current) return;
     setIsCapturing(true);
     try {
       const video = videoRef.current;
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 1920;
-      canvas.height = video.videoHeight || 1080;
+      const w = video.videoWidth || 1920;
+      const h = video.videoHeight || 1080;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const rawUrl = canvas.toDataURL('image/jpeg', 0.98);
+        ctx.drawImage(video, 0, 0, w, h);
+        const rawUrl = canvas.toDataURL('image/jpeg', APP_CONFIG.defaultJpegQuality);
 
         setEditingPageIndex(null);
         setCurrentRawCapture(rawUrl);
         setCropModalOpen(true);
       }
+      canvas.width = 0;
+      canvas.height = 0;
     } catch (err) {
-      console.error('Capture error:', err);
+      logger.error('CameraScanner', 'Capture error', err);
+      showToast('Capture failed', 'error');
     } finally {
       setIsCapturing(false);
     }
   };
 
-  // Upload photo from gallery
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
@@ -153,14 +169,12 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     }
   };
 
-  // Applied Crop & Filter callback from CropModal
   const handleApplyCropResult = (
     processedDataUrl: string,
     originalDataUrl: string,
     filter: ScannerFilter
   ) => {
     if (editingPageIndex !== null && pages[editingPageIndex]) {
-      // Update existing page
       setPages((prev) =>
         prev.map((p, idx) =>
           idx === editingPageIndex
@@ -168,19 +182,19 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
             : p
         )
       );
+      showToast('Page updated', 'success');
     } else {
-      // Add new page to batch
       const newPage: ScannedPageItem = {
-        id: `page_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         originalDataUrl,
         processedDataUrl,
         filter,
       };
       setPages((prev) => [...prev, newPage]);
+      showToast(`Page ${pages.length + 1} added`, 'success');
     }
   };
 
-  // Re-edit a scanned page
   const handleEditPage = (idx: number) => {
     const target = pages[idx];
     if (target) {
@@ -190,12 +204,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     }
   };
 
-  // Delete page
   const handleDeletePage = (idx: number) => {
     setPages((prev) => prev.filter((_, i) => i !== idx));
+    showToast('Page removed', 'info');
   };
 
-  // Generate & Save PDF
   const handleExportPDF = async () => {
     if (pages.length === 0) return;
     setExportingPdf(true);
@@ -205,9 +218,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         { pageSize: 'a4', orientation: 'portrait', margin: 15 }
       );
 
-      const finalName = docName.endsWith('.pdf') ? docName : `${docName}.pdf`;
+      const finalName = ensurePdfExtension(docName, 'Scan');
 
-      // Save to offline storage
       await saveDocumentLocally({
         name: finalName,
         sizeBytes: pdfBytes.byteLength,
@@ -220,6 +232,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
 
       setGeneratedPdf(pdfBytes);
       setIsPreviewOpen(true);
+      showToast('PDF created successfully!', 'success');
 
       confetti({
         particleCount: 80,
@@ -227,7 +240,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         origin: { y: 0.7 },
       });
     } catch (err) {
-      console.error('Error generating PDF:', err);
+      logger.error('CameraScanner', 'Error generating PDF', err);
+      showToast('Error generating PDF', 'error');
     } finally {
       setExportingPdf(false);
     }
@@ -237,14 +251,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     <div className="flex flex-col h-full max-w-4xl mx-auto space-y-4 pb-20 md:pb-6">
       {/* Top Controls & Document Name Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md">
-        <div className="flex items-center space-x-2 flex-1 min-w-[200px]">
+        <div className="flex items-center space-x-2 flex-1 min-w-[180px]">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Doc:</span>
           <input
             type="text"
             value={docName}
             onChange={(e) => setDocName(e.target.value)}
             placeholder="Document Name"
-            className="bg-slate-950/80 border border-slate-800 text-slate-100 px-3 py-1.5 rounded-xl text-sm focus:outline-none focus:border-blue-500 flex-1"
+            className="bg-slate-950/80 border border-slate-800 text-slate-100 px-3 py-1.5 rounded-xl text-xs sm:text-sm focus:outline-none focus:border-blue-500 flex-1"
           />
         </div>
 
@@ -259,11 +273,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
               className="flex items-center space-x-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer"
             >
               {exportingPdf ? (
-                <span>Generating...</span>
+                <span>Saving...</span>
               ) : (
                 <>
                   <FileCheck className="w-4 h-4" />
-                  <span>Done & Save PDF</span>
+                  <span>Done & Save</span>
                 </>
               )}
             </button>
@@ -302,7 +316,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         {/* Floating Top In-Camera Bar */}
         <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
           <div className="px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-xs font-semibold text-white/90 flex items-center space-x-1.5">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span>Auto-Cut & Light AI</span>
           </div>
 
@@ -381,8 +395,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         {pages.length > 0 && (
           <button
             onClick={() => {
-              if (confirm('Clear all scanned pages?')) {
+              if (window.confirm('Clear all scanned pages?')) {
                 setPages([]);
+                showToast('Cleared all pages', 'info');
               }
             }}
             className="flex flex-col items-center justify-center p-3 rounded-2xl bg-slate-900/80 border border-slate-800 hover:bg-red-500/20 hover:border-red-500/30 text-slate-300 hover:text-red-400 transition-all active:scale-95 cursor-pointer"
@@ -458,7 +473,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
         pdfData={generatedPdf}
-        filename={docName.endsWith('.pdf') ? docName : `${docName}.pdf`}
+        filename={ensurePdfExtension(docName, 'Scan')}
       />
     </div>
   );

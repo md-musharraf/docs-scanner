@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/layout/Header';
 import { Navigation } from './components/layout/Navigation';
 import type { ActiveTab } from './components/layout/Navigation';
@@ -10,48 +10,65 @@ import { ImageToPdfTool } from './components/tools/ImageToPdfTool';
 import { PdfTools } from './components/tools/PdfTools';
 import { SavedDocsView } from './components/tools/SavedDocsView';
 import { getAllSavedDocuments } from './lib/storage';
-import type { SavedDocument } from './lib/storage';
+import type { SavedDocumentMetadata } from './core/types';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { ToastProvider } from './components/common/Toast';
+import { logger } from './core/logger';
 
-export function App() {
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+export function AppContent() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('scan');
-  const [savedDocs, setSavedDocs] = useState<SavedDocument[]>([]);
-  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [savedDocs, setSavedDocs] = useState<SavedDocumentMetadata[]>([]);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
-  const refreshSavedDocs = async () => {
+  const refreshSavedDocs = useCallback(async () => {
     try {
       const docs = await getAllSavedDocuments();
       setSavedDocs(docs);
     } catch (err) {
-      console.error('Error refreshing docs:', err);
+      logger.error('App', 'Error refreshing saved docs', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    refreshSavedDocs();
+    let isMounted = true;
+
+    getAllSavedDocuments()
+      .then((docs) => {
+        if (isMounted) setSavedDocs(docs);
+      })
+      .catch((err) => {
+        logger.error('App', 'Error loading initial saved docs', err);
+      });
 
     // Listen for PWA installation prompt
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setInstallPrompt(e);
+      setInstallPrompt(e as BeforeInstallPromptEvent);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // Register offline service worker if supported
+    // Register offline service worker if supported in production
     if ('serviceWorker' in navigator && (import.meta as any).env?.PROD) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.log('SW registration error:', err);
+        logger.warn('ServiceWorker', 'SW registration failed', err);
       });
     }
 
     return () => {
+      isMounted = false;
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
 
   const handleInstallApp = async () => {
     if (installPrompt) {
-      installPrompt.prompt();
+      await installPrompt.prompt();
       const outcome = await installPrompt.userChoice;
       if (outcome.outcome === 'accepted') {
         setInstallPrompt(null);
@@ -100,6 +117,16 @@ export function App() {
         )}
       </main>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <ErrorBoundary>
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

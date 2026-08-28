@@ -1,65 +1,88 @@
 import React, { useState } from 'react';
 import { FolderArchive, Trash2, Download, Eye, FileText, Search, Share2, Calendar, HardDrive } from 'lucide-react';
-import { deleteDocument, downloadFile } from '../../lib/storage';
-import type { SavedDocument } from '../../lib/storage';
+import { deleteDocument, downloadFile, shareDocument, getDocumentData } from '../../lib/storage';
+import type { SavedDocumentMetadata } from '../../core/types';
 import { PdfViewerModal } from '../common/PdfViewerModal';
+import { formatFileSize, formatDate } from '../../utils/formatters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 interface SavedDocsViewProps {
-  documents: SavedDocument[];
+  documents: SavedDocumentMetadata[];
   onRefresh: () => void;
 }
 
 export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefresh }) => {
+  const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDoc, setSelectedDoc] = useState<SavedDocument | null>(null);
+  const [activePreviewData, setActivePreviewData] = useState<Uint8Array | null>(null);
+  const [activePreviewName, setActivePreviewName] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [loadingDocId, setLoadingDocId] = useState<string | null>(null);
 
   const filtered = documents.filter((doc) =>
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleDelete = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete "${name}" from offline storage?`)) {
-      await deleteDocument(id);
-      onRefresh();
+    if (window.confirm(`Delete "${name}" from offline storage?`)) {
+      try {
+        await deleteDocument(id);
+        showToast(`Deleted ${name}`, 'info');
+        onRefresh();
+      } catch (err) {
+        logger.error('SavedDocsView', 'Error deleting document', err);
+        showToast('Error deleting document', 'error');
+      }
     }
   };
 
-  const handleOpenPreview = (doc: SavedDocument) => {
-    setSelectedDoc(doc);
-    setIsPreviewOpen(true);
-  };
-
-  const handleDownload = (doc: SavedDocument) => {
-    downloadFile(doc.data, doc.name);
-  };
-
-  const handleShare = async (doc: SavedDocument) => {
-    if (!navigator.share) return;
+  const handleOpenPreview = async (doc: SavedDocumentMetadata) => {
+    setLoadingDocId(doc.id);
     try {
-      const file = new File([doc.data as any], doc.name, { type: 'application/pdf' });
-      await navigator.share({
-        files: [file],
-        title: doc.name,
-      });
-    } catch (e) {
-      console.log('Share canceled:', e);
+      const data = await getDocumentData(doc.id);
+      if (data) {
+        setActivePreviewData(data);
+        setActivePreviewName(doc.name);
+        setIsPreviewOpen(true);
+      } else {
+        showToast('Could not load document binary data', 'error');
+      }
+    } catch (err) {
+      logger.error('SavedDocsView', 'Error opening preview', err);
+      showToast('Error loading document', 'error');
+    } finally {
+      setLoadingDocId(null);
     }
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  const handleDownload = async (doc: SavedDocumentMetadata) => {
+    try {
+      const data = await getDocumentData(doc.id);
+      if (data) {
+        await downloadFile(data, doc.name);
+        showToast(`Saved ${doc.name}`, 'success');
+      } else {
+        showToast('Document not found in storage', 'error');
+      }
+    } catch (err) {
+      logger.error('SavedDocsView', 'Error downloading document', err);
+      showToast('Failed to save document', 'error');
+    }
   };
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+  const handleShare = async (doc: SavedDocumentMetadata) => {
+    try {
+      const data = await getDocumentData(doc.id);
+      if (data) {
+        const shared = await shareDocument(data, doc.name);
+        if (shared) {
+          showToast('Shared document', 'success');
+        }
+      }
+    } catch (err) {
+      logger.error('SavedDocsView', 'Error sharing document', err);
+    }
   };
 
   const totalStorageBytes = documents.reduce((acc, d) => acc + d.sizeBytes, 0);
@@ -132,7 +155,11 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
                     <FileText className="w-7 h-7 text-blue-400" />
                   )}
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                    <Eye className="w-4 h-4" />
+                    {loadingDocId === doc.id ? (
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
                   </div>
                 </div>
 
@@ -165,22 +192,21 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
               <div className="flex items-center justify-between pt-4 mt-3 border-t border-slate-800/80">
                 <button
                   onClick={() => handleOpenPreview(doc)}
-                  className="flex items-center space-x-1.5 text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer"
+                  disabled={loadingDocId === doc.id}
+                  className="flex items-center space-x-1.5 text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer disabled:opacity-50"
                 >
                   <Eye className="w-3.5 h-3.5" />
-                  <span>Preview</span>
+                  <span>{loadingDocId === doc.id ? 'Loading...' : 'Preview'}</span>
                 </button>
 
                 <div className="flex items-center space-x-1">
-                  {typeof navigator !== 'undefined' && 'share' in navigator && (
-                    <button
-                      onClick={() => handleShare(doc)}
-                      className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-                      title="Share"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleShare(doc)}
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Share"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                  </button>
 
                   <button
                     onClick={() => handleDownload(doc)}
@@ -205,15 +231,16 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
       )}
 
       {/* Preview Modal */}
-      {selectedDoc && (
+      {activePreviewData && (
         <PdfViewerModal
           isOpen={isPreviewOpen}
           onClose={() => {
             setIsPreviewOpen(false);
-            setSelectedDoc(null);
+            setActivePreviewData(null);
+            setActivePreviewName('');
           }}
-          pdfData={selectedDoc.data}
-          filename={selectedDoc.name}
+          pdfData={activePreviewData}
+          filename={activePreviewName}
         />
       )}
     </div>

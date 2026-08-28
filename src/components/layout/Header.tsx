@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileText, ShieldCheck, Smartphone } from 'lucide-react';
+import { APP_CONFIG } from '../../core/constants';
 
 interface HeaderProps {
   activeTab: string;
@@ -9,7 +10,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onInstallClick, canInstall }) => {
   return (
-    <header className="sticky top-0 z-30 w-full bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
+    <header className="sticky top-0 z-30 w-full bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6 pt-[max(env(safe-area-inset-top),12px)]">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         {/* Brand Logo & Name */}
         <div className="flex items-center space-x-3">
@@ -21,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({ onInstallClick, canInstall }) =>
           <div>
             <div className="flex items-center space-x-2">
               <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
-                DocuCraft <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">PRO</span>
+                {APP_CONFIG.appName.split(' ')[0]} <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">PRO</span>
               </h1>
             </div>
             <p className="text-xs text-slate-400 font-medium">100% Offline Mobile PDF Studio</p>

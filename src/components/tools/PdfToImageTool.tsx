@@ -4,25 +4,21 @@ import JSZip from 'jszip';
 import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
 import { renderAllPdfPages } from '../../lib/pdfRenderer';
-import type { RenderedPage } from '../../lib/pdfRenderer';
+import type { RenderedPage } from '../../core/types';
 import { downloadFile } from '../../lib/storage';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 export const PdfToImageTool: React.FC = () => {
+  const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [renderedPages, setRenderedPages] = useState<RenderedPage[]>([]);
   const [format, setFormat] = useState<'jpeg' | 'png'>('jpeg');
-  const [scale, setScale] = useState<number>(2.0); // High res by default
+  const [scale, setScale] = useState<number>(1.5);
   const [isRendering, setIsRendering] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [isZipping, setIsZipping] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-
-  const handleFileSelected = async (files: File[]) => {
-    if (files.length === 0) return;
-    const selectedFile = files[0];
-    setFile(selectedFile);
-    await processPdfToImages(selectedFile, scale);
-  };
 
   const processPdfToImages = async (pdfFile: File, currentScale: number) => {
     setIsRendering(true);
@@ -32,16 +28,24 @@ export const PdfToImageTool: React.FC = () => {
         setProgress({ current, total });
       });
       setRenderedPages(pages);
+      showToast(`Converted ${pages.length} pages to images!`, 'success');
       confetti({
         particleCount: 50,
         spread: 60,
       });
     } catch (err) {
-      console.error('Error converting PDF to images:', err);
-      alert('Failed to convert PDF to images. Please check the file.');
+      logger.error('PdfToImageTool', 'Error converting PDF to images', err);
+      showToast('Failed to convert PDF to images. Please check the file.', 'error');
     } finally {
       setIsRendering(false);
     }
+  };
+
+  const handleFileSelected = async (files: File[]) => {
+    if (files.length === 0) return;
+    const selectedFile = files[0];
+    setFile(selectedFile);
+    await processPdfToImages(selectedFile, scale);
   };
 
   const handleFormatChange = (newFormat: 'jpeg' | 'png') => {
@@ -55,16 +59,20 @@ export const PdfToImageTool: React.FC = () => {
     }
   };
 
-  const handleDownloadSingle = (page: RenderedPage) => {
+  const handleDownloadSingle = async (page: RenderedPage) => {
     const baseName = file?.name.replace(/\.pdf$/i, '') || 'document';
     const ext = format === 'png' ? 'png' : 'jpg';
     const filename = `${baseName}_page_${page.pageNumber}.${ext}`;
 
-    fetch(page.dataUrl)
-      .then((res) => res.blob())
-      .then((blob) => {
-        downloadFile(blob, filename, `image/${format}`);
-      });
+    try {
+      const res = await fetch(page.dataUrl);
+      const blob = await res.blob();
+      await downloadFile(blob, filename, `image/${format}`);
+      showToast(`Saved ${filename}`, 'success');
+    } catch (err) {
+      logger.error('PdfToImageTool', 'Error downloading image', err);
+      showToast('Download failed', 'error');
+    }
   };
 
   const handleDownloadAllZip = async () => {
@@ -82,15 +90,16 @@ export const PdfToImageTool: React.FC = () => {
       }
 
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      downloadFile(zipBlob, `${baseName}_images.zip`, 'application/zip');
+      await downloadFile(zipBlob, `${baseName}_images.zip`, 'application/zip');
+      showToast('ZIP archive saved!', 'success');
 
       confetti({
         particleCount: 70,
         spread: 70,
       });
     } catch (err) {
-      console.error('ZIP error:', err);
-      alert('Error creating ZIP archive.');
+      logger.error('PdfToImageTool', 'ZIP error', err);
+      showToast('Error creating ZIP archive', 'error');
     } finally {
       setIsZipping(false);
     }
@@ -174,9 +183,9 @@ export const PdfToImageTool: React.FC = () => {
                 onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer"
               >
+                <option value={1.2}>1.2x Fast</option>
                 <option value={1.5}>1.5x Medium</option>
-                <option value={2.0}>2.0x High (Crisp)</option>
-                <option value={3.0}>3.0x Ultra HD</option>
+                <option value={2.0}>2.0x Crisp HD</option>
               </select>
 
               <button
@@ -189,7 +198,7 @@ export const PdfToImageTool: React.FC = () => {
                 ) : (
                   <>
                     <Archive className="w-3.5 h-3.5" />
-                    <span>Download All (ZIP)</span>
+                    <span>Download (ZIP)</span>
                   </>
                 )}
               </button>
@@ -237,7 +246,7 @@ export const PdfToImageTool: React.FC = () => {
                     className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Download</span>
+                    <span>Save Image</span>
                   </button>
                 </div>
               </div>
@@ -250,7 +259,7 @@ export const PdfToImageTool: React.FC = () => {
       {previewImage && (
         <div
           onClick={() => setPreviewImage(null)}
-          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
         >
           <div className="relative max-w-4xl max-h-[90vh] overflow-auto rounded-2xl bg-white p-2">
             <img src={previewImage} alt="Preview" className="w-full h-auto max-h-[85vh] object-contain" />

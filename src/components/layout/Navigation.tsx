@@ -52,7 +52,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab, 
       </div>
 
       {/* Mobile Bottom Dock Navigation */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/90 pb-[max(env(safe-area-inset-bottom),8px)] pt-2 px-2 shadow-2xl">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/90 pb-[max(env(safe-area-inset-bottom),10px)] pt-2 px-2 shadow-2xl touch-manipulation">
         <div className="flex items-center justify-around max-w-lg mx-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -61,7 +61,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab, 
               <button
                 key={tab.id}
                 onClick={() => onSelectTab(tab.id)}
-                className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all cursor-pointer relative ${
+                className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all cursor-pointer relative select-none ${
                   isActive ? 'text-blue-400 scale-105' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -78,7 +78,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab, 
                 </div>
                 <span className="text-[10px] font-semibold mt-0.5 tracking-tight line-clamp-1">{tab.label}</span>
                 {tab.badge !== undefined && (
-                  <span className="absolute top-0 right-2 w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-bold flex items-center justify-center">
+                  <span className="absolute top-0 right-1.5 w-4 h-4 rounded-full bg-blue-600 text-white text-[9px] font-bold flex items-center justify-center">
                     {tab.badge}
                   </span>
                 )}

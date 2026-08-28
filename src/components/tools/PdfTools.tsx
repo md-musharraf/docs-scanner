@@ -6,6 +6,9 @@ import { addWatermarkToPDF, rotatePDFPages, removePagesFromPDF } from '../../lib
 import { getPdfPageCount } from '../../lib/pdfRenderer';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
+import { ensurePdfExtension } from '../../utils/formatters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 type SubTool = 'watermark' | 'rotate' | 'remove';
 
@@ -14,6 +17,7 @@ interface PdfToolsProps {
 }
 
 export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
+  const { showToast } = useToast();
   const [activeSubTool, setActiveSubTool] = useState<SubTool>('watermark');
   const [file, setFile] = useState<File | null>(null);
   const [buffer, setBuffer] = useState<ArrayBuffer | null>(null);
@@ -44,8 +48,10 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
       setBuffer(buf);
       const count = await getPdfPageCount(buf);
       setPageCount(count);
+      showToast(`Loaded ${selectedFile.name} (${count} pages)`, 'success');
     } catch (e) {
-      console.error('Error loading PDF:', e);
+      logger.error('PdfTools', 'Error loading PDF', e);
+      showToast('Could not read PDF file', 'error');
     }
   };
 
@@ -64,14 +70,14 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
           fontSize: watermarkSize,
           angle: -45,
         });
-        outputName = `${baseName}_watermarked.pdf`;
+        outputName = ensurePdfExtension(`${baseName}_watermarked`);
       } else if (activeSubTool === 'rotate') {
         const rotMap: Record<number, number> = {};
         for (let i = 0; i < pageCount; i++) {
           rotMap[i] = rotateAngle;
         }
         outputBytes = await rotatePDFPages(buffer, rotMap);
-        outputName = `${baseName}_rotated_${rotateAngle}deg.pdf`;
+        outputName = ensurePdfExtension(`${baseName}_rotated_${rotateAngle}deg`);
       } else {
         const pagesToRemove: number[] = [];
         const parts = removePagesInput.split(',');
@@ -81,8 +87,13 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
             pagesToRemove.push(num - 1);
           }
         }
+        if (pagesToRemove.length === 0) {
+          showToast('Please enter valid page numbers to delete', 'error');
+          setIsProcessing(false);
+          return;
+        }
         outputBytes = await removePagesFromPDF(buffer, pagesToRemove);
-        outputName = `${baseName}_trimmed.pdf`;
+        outputName = ensurePdfExtension(`${baseName}_trimmed`);
       }
 
       await saveDocumentLocally({
@@ -97,14 +108,15 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
 
       setResultPdf(outputBytes);
       setIsPreviewOpen(true);
+      showToast('Modified PDF saved successfully!', 'success');
 
       confetti({
         particleCount: 70,
         spread: 55,
       });
     } catch (err) {
-      console.error('Error applying tool:', err);
-      alert('Error modifying PDF. Please ensure the file is valid.');
+      logger.error('PdfTools', 'Error applying tool', err);
+      showToast('Error modifying PDF. Please ensure the file is valid.', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -147,7 +159,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
             }`}
           >
             <RotateCw className="w-4 h-4 text-purple-400" />
-            <span>Rotate Pages</span>
+            <span>Rotate</span>
           </button>
 
           <button

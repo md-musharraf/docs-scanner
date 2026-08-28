@@ -9,12 +9,13 @@ import {
 } from 'lucide-react';
 import {
   autoDetectDocumentCorners,
-  getDefaultCorners,
+  calculateDefaultCorners,
   warpPerspectiveCrop,
 } from '../../lib/perspectiveTransform';
-import type { CornerQuad } from '../../lib/perspectiveTransform';
+import type { CornerQuad, ScannerFilter } from '../../core/types';
 import { applyImageFilter, loadImageElement } from '../../lib/imageFilters';
-import type { ScannerFilter } from '../../lib/imageFilters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 interface CropModalProps {
   isOpen: boolean;
@@ -29,6 +30,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   onClose,
   onApplyCrop,
 }) => {
+  const { showToast } = useToast();
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -54,30 +56,37 @@ export const CropModal: React.FC<CropModalProps> = ({
 
   // Load and auto-detect corners on open
   useEffect(() => {
-    if (isOpen && imageSrc) {
-      loadImage(imageSrc);
-    }
-  }, [isOpen, imageSrc]);
+    if (!isOpen || !imageSrc) return;
+    let isMounted = true;
 
-  const loadImage = async (src: string) => {
-    try {
-      const img = await loadImageElement(src);
-      setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+    loadImageElement(imageSrc)
+      .then((img) => {
+        if (!isMounted) return;
+        setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
 
-      // Auto-detect paper document quad
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const detected = autoDetectDocumentCorners(canvas);
-        setCorners(detected);
-      }
-    } catch (err) {
-      console.error('Error loading image in crop modal:', err);
-    }
-  };
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const detected = autoDetectDocumentCorners(canvas);
+          if (isMounted) setCorners(detected);
+        }
+        canvas.width = 0;
+        canvas.height = 0;
+      })
+      .catch((err) => {
+        if (isMounted) {
+          logger.error('CropModal', 'Error loading image in crop modal', err);
+          showToast('Could not load image for crop', 'error');
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, imageSrc, showToast]);
 
   // Recalculate display size on window resize
   useEffect(() => {
@@ -145,7 +154,6 @@ export const CropModal: React.FC<CropModalProps> = ({
     lCtx.fill();
   }, [draggingCorner, corners]);
 
-  // Convert natural coordinate to display coordinate
   const toDisplayX = (x: number) => {
     if (!naturalSize.width) return x;
     return (x / naturalSize.width) * displaySize.width;
@@ -156,7 +164,6 @@ export const CropModal: React.FC<CropModalProps> = ({
     return (y / naturalSize.height) * displaySize.height;
   };
 
-  // Convert display coordinate to natural coordinate
   const toNaturalX = (clientX: number) => {
     if (!displaySize.width) return 0;
     const relX = clientX - displaySize.left;
@@ -171,7 +178,6 @@ export const CropModal: React.FC<CropModalProps> = ({
     return (clamped / displaySize.height) * naturalSize.height;
   };
 
-  // Touch and pointer handlers for draggable corners
   const handlePointerDown = (cornerKey: keyof CornerQuad, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -203,8 +209,8 @@ export const CropModal: React.FC<CropModalProps> = ({
       setDragClientPos(null);
       try {
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-      } catch (err) {
-        // Pointer capture release
+      } catch {
+        // Pointer capture release safeguard
       }
     }
   };
@@ -222,13 +228,17 @@ export const CropModal: React.FC<CropModalProps> = ({
         const detected = autoDetectDocumentCorners(canvas);
         setCorners(detected);
       }
+      canvas.width = 0;
+      canvas.height = 0;
+      showToast('Document corners detected', 'info');
     };
     img.src = imageSrc;
   };
 
   const handleResetFull = () => {
     if (!naturalSize.width) return;
-    setCorners(getDefaultCorners(naturalSize.width, naturalSize.height, 0.01));
+    setCorners(calculateDefaultCorners(naturalSize.width, naturalSize.height, 0.01));
+    showToast('Reset to full frame', 'info');
   };
 
   const handleRotate = () => {
@@ -281,12 +291,21 @@ export const CropModal: React.FC<CropModalProps> = ({
         contrast,
       });
 
-      const croppedOriginalUrl = finalCanvas.toDataURL('image/jpeg', 0.95);
+      const croppedOriginalUrl = finalCanvas.toDataURL('image/jpeg', 0.94);
+
+      // Clean memory
+      canvas.width = 0;
+      canvas.height = 0;
+      if (finalCanvas !== canvas) {
+        finalCanvas.width = 0;
+        finalCanvas.height = 0;
+      }
 
       onApplyCrop(processedUrl, croppedOriginalUrl, activeFilter);
       onClose();
     } catch (err) {
-      console.error('Error applying crop & filter:', err);
+      logger.error('CropModal', 'Error applying crop & filter', err);
+      showToast('Error applying crop and filters', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -297,7 +316,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-2xl animate-in fade-in duration-200">
       {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 pt-[max(env(safe-area-inset-top),12px)]">
         <div className="flex items-center space-x-2">
           <button
             onClick={onClose}
@@ -309,7 +328,7 @@ export const CropModal: React.FC<CropModalProps> = ({
             <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
               Auto-Cut & Light Adjust <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-semibold border border-blue-500/30">AI</span>
             </h3>
-            <p className="text-[11px] text-slate-400">Drag 4 corner handles to adjust document boundary</p>
+            <p className="text-[11px] text-slate-400">Drag 4 corner handles to adjust boundary</p>
           </div>
         </div>
 
@@ -392,7 +411,7 @@ export const CropModal: React.FC<CropModalProps> = ({
             </svg>
           )}
 
-          {/* Draggable Corner Magnetic Circles */}
+          {/* Draggable Corner Handles */}
           {corners && displaySize.width > 0 && (
             <>
               {(
@@ -421,7 +440,6 @@ export const CropModal: React.FC<CropModalProps> = ({
                       isDragging ? 'scale-125' : ''
                     }`}
                   >
-                    {/* Visual Corner Target */}
                     <div className="w-7 h-7 rounded-full bg-blue-600 border-2 border-white shadow-[0_0_15px_#38bdf8] flex items-center justify-center">
                       <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse"></div>
                     </div>
@@ -432,7 +450,7 @@ export const CropModal: React.FC<CropModalProps> = ({
           )}
         </div>
 
-        {/* Floating Magnifying Loupe during corner drag */}
+        {/* Magnifying Loupe */}
         {draggingCorner && dragClientPos && (
           <div
             style={{
@@ -447,8 +465,8 @@ export const CropModal: React.FC<CropModalProps> = ({
         )}
       </div>
 
-      {/* Quick Toolbar: Auto-Detect, Full, Rotate, Lighting */}
-      <div className="bg-slate-900/95 border-t border-slate-800 p-3 space-y-3">
+      {/* Quick Toolbar */}
+      <div className="bg-slate-900/95 border-t border-slate-800 p-3 space-y-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           <button
             onClick={handleAutoDetect}
@@ -483,11 +501,11 @@ export const CropModal: React.FC<CropModalProps> = ({
             }`}
           >
             <Sun className="w-3.5 h-3.5 text-amber-400" />
-            <span>Light & Contrast</span>
+            <span>Light</span>
           </button>
         </div>
 
-        {/* Lighting & Shadow Adjustment Sliders */}
+        {/* Lighting & Contrast Adjustments */}
         {showLightingControls && (
           <div className="bg-slate-950/90 border border-slate-800 p-3 rounded-2xl space-y-2.5 max-w-lg mx-auto animate-in fade-in duration-150">
             <div className="flex items-center justify-between">
@@ -500,7 +518,7 @@ export const CropModal: React.FC<CropModalProps> = ({
                 />
                 <span>Equalize Illumination & Whiten Paper</span>
               </label>
-              <span className="text-[10px] text-emerald-400 font-semibold">Enabled</span>
+              <span className="text-[10px] text-emerald-400 font-semibold">AI Enabled</span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-1">
@@ -537,7 +555,7 @@ export const CropModal: React.FC<CropModalProps> = ({
           </div>
         )}
 
-        {/* Filter Quick Preset Strip */}
+        {/* Filter Presets */}
         <div className="grid grid-cols-4 gap-2 max-w-lg mx-auto">
           {[
             { id: 'bw_document' as ScannerFilter, label: 'Magic B&W' },

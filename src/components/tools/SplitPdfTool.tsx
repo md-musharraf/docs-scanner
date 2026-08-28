@@ -3,16 +3,20 @@ import { Scissors, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
 import { renderAllPdfPages } from '../../lib/pdfRenderer';
-import type { RenderedPage } from '../../lib/pdfRenderer';
+import type { RenderedPage } from '../../core/types';
 import { splitPDF } from '../../lib/pdfEngine';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
+import { ensurePdfExtension } from '../../utils/formatters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 interface SplitPdfToolProps {
   onDocumentSaved?: () => void;
 }
 
 export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) => {
+  const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [fileBuffer, setFileBuffer] = useState<ArrayBuffer | null>(null);
   const [renderedPages, setRenderedPages] = useState<RenderedPage[]>([]);
@@ -35,16 +39,18 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       const buffer = await selectedFile.arrayBuffer();
       setFileBuffer(buffer);
 
-      const pages = await renderAllPdfPages(buffer, 0.7, (current, total) => {
+      // Fast thumbnail scale for splitting page grid
+      const pages = await renderAllPdfPages(buffer, 0.6, (current, total) => {
         setProgress({ current, total });
       });
 
       setRenderedPages(pages);
       // Default: select all
       setSelectedPages(pages.map((p) => p.pageNumber));
+      showToast(`Loaded ${pages.length} pages`, 'success');
     } catch (err) {
-      console.error('Error rendering PDF for splitting:', err);
-      alert('Could not render PDF. Please ensure it is a valid, unencrypted PDF.');
+      logger.error('SplitPdfTool', 'Error rendering PDF for splitting', err);
+      showToast('Could not render PDF. Ensure it is valid & unencrypted.', 'error');
     } finally {
       setIsLoadingPages(false);
     }
@@ -88,7 +94,9 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       }
     }
 
-    setSelectedPages(Array.from(selected).sort((a, b) => a - b));
+    const result = Array.from(selected).sort((a, b) => a - b);
+    setSelectedPages(result);
+    showToast(`Selected ${result.length} pages from range`, 'info');
   };
 
   const handleExtract = async () => {
@@ -100,7 +108,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       const extractedBytes = await splitPDF(fileBuffer, indices);
 
       const baseName = file?.name.replace(/\.pdf$/i, '') || 'Document';
-      const outputName = `${baseName}_pages_${selectedPages.join('_')}.pdf`;
+      const outputName = ensurePdfExtension(`${baseName}_extracted_${selectedPages.length}pages`);
 
       // Save to offline indexedDB
       await saveDocumentLocally({
@@ -115,14 +123,15 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
 
       setSplitPdfData(extractedBytes);
       setIsPreviewOpen(true);
+      showToast('Extracted pages saved to new PDF!', 'success');
 
       confetti({
         particleCount: 70,
         spread: 50,
       });
     } catch (err) {
-      console.error('Extract error:', err);
-      alert('Error extracting pages.');
+      logger.error('SplitPdfTool', 'Extract error', err);
+      showToast('Error extracting pages', 'error');
     } finally {
       setIsSplitting(false);
     }

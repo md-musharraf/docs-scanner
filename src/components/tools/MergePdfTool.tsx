@@ -6,6 +6,9 @@ import { mergePDFs } from '../../lib/pdfEngine';
 import { getPdfPageCount } from '../../lib/pdfRenderer';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
+import { formatFileSize, generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
+import { useToast } from '../../hooks/useToast';
+import { logger } from '../../core/logger';
 
 interface PdfFileItem {
   id: string;
@@ -21,9 +24,10 @@ interface MergePdfToolProps {
 }
 
 export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) => {
+  const { showToast } = useToast();
   const [files, setFiles] = useState<PdfFileItem[]>([]);
   const [mergedPdf, setMergedPdf] = useState<Uint8Array | null>(null);
-  const [mergedFilename, setMergedFilename] = useState(`Merged_${Date.now().toString().slice(-4)}.pdf`);
+  const [mergedFilename, setMergedFilename] = useState(() => generateDefaultDocName('Merged'));
   const [isMerging, setIsMerging] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
@@ -32,27 +36,37 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
       (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
     );
 
+    if (pdfFiles.length === 0) {
+      showToast('Please select valid PDF documents', 'error');
+      return;
+    }
+
     const newItems: PdfFileItem[] = [];
     for (const file of pdfFiles) {
-      const buffer = await file.arrayBuffer();
-      let pageCount = 1;
       try {
-        pageCount = await getPdfPageCount(buffer);
-      } catch (e) {
-        console.error('Error getting page count:', e);
-      }
+        const buffer = await file.arrayBuffer();
+        let pageCount = 1;
+        try {
+          pageCount = await getPdfPageCount(buffer);
+        } catch (e) {
+          logger.warn('MergePdfTool', 'Error reading page count, defaulting to 1', e);
+        }
 
-      newItems.push({
-        id: `pdf_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        file,
-        name: file.name,
-        size: file.size,
-        buffer,
-        pageCount,
-      });
+        newItems.push({
+          id: `pdf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          file,
+          name: file.name,
+          size: file.size,
+          buffer,
+          pageCount,
+        });
+      } catch (err) {
+        logger.error('MergePdfTool', `Error loading file ${file.name}`, err);
+      }
     }
 
     setFiles((prev) => [...prev, ...newItems]);
+    showToast(`Added ${newItems.length} PDF${newItems.length > 1 ? 's' : ''}`, 'success');
   };
 
   const moveUp = (index: number) => {
@@ -78,14 +92,17 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
   };
 
   const handleMerge = async () => {
-    if (files.length < 2) return;
+    if (files.length < 2) {
+      showToast('Select at least 2 PDF files to merge', 'error');
+      return;
+    }
     setIsMerging(true);
     try {
       const buffers = files.map((f) => f.buffer);
       const mergedBytes = await mergePDFs(buffers);
 
       const totalPages = files.reduce((sum, f) => sum + f.pageCount, 0);
-      const finalName = mergedFilename.endsWith('.pdf') ? mergedFilename : `${mergedFilename}.pdf`;
+      const finalName = ensurePdfExtension(mergedFilename, 'Merged');
 
       // Save to offline storage
       await saveDocumentLocally({
@@ -100,23 +117,18 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
 
       setMergedPdf(mergedBytes);
       setIsPreviewOpen(true);
+      showToast('PDFs merged successfully!', 'success');
 
       confetti({
         particleCount: 70,
         spread: 50,
       });
     } catch (err) {
-      console.error('Merge error:', err);
-      alert('Error merging PDFs. Please ensure valid PDF files.');
+      logger.error('MergePdfTool', 'Merge error', err);
+      showToast('Error merging PDFs. Please ensure valid files.', 'error');
     } finally {
       setIsMerging(false);
     }
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const totalPageCount = files.reduce((acc, curr) => acc + curr.pageCount, 0);
@@ -184,7 +196,7 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
                     {idx + 1}
                   </div>
                   <div className="truncate">
-                    <h4 className="text-sm font-medium text-slate-200 truncate max-w-[220px] sm:max-w-md">
+                    <h4 className="text-sm font-medium text-slate-200 truncate max-w-[200px] sm:max-w-md">
                       {item.name}
                     </h4>
                     <p className="text-xs text-slate-400">
@@ -251,7 +263,7 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
         pdfData={mergedPdf}
-        filename={mergedFilename}
+        filename={ensurePdfExtension(mergedFilename, 'Merged')}
       />
     </div>
   );

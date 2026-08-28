@@ -53,7 +53,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       onClick={() => fileInputRef.current?.click()}
-      className={`relative group cursor-pointer border-2 border-dashed rounded-3xl p-8 sm:p-12 text-center transition-all duration-300 ${
+      className={`relative group cursor-pointer border-2 border-dashed rounded-3xl p-6 sm:p-10 text-center transition-all duration-200 select-none ${
         isDragging
           ? 'border-blue-500 bg-blue-500/10 scale-[1.01]'
           : 'border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-900/70'
@@ -68,29 +68,26 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
         onChange={handleFileInputChange}
       />
 
-      <div className="flex flex-col items-center justify-center space-y-4">
-        {/* Animated Icon container */}
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 group-hover:text-blue-300 transition-transform duration-300 shadow-inner">
+      <div className="flex flex-col items-center justify-center space-y-3">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 group-hover:text-blue-300 transition-transform duration-200 shadow-inner">
           {icon === 'pdf' ? (
-            <UploadCloud className="w-8 h-8" />
+            <UploadCloud className="w-7 h-7" />
           ) : (
-            <ImageIcon className="w-8 h-8" />
+            <ImageIcon className="w-7 h-7" />
           )}
         </div>
 
-        {/* Text descriptions */}
         <div className="space-y-1 max-w-sm mx-auto">
-          <h3 className="text-base sm:text-lg font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">
+          <h3 className="text-sm sm:text-base font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">
             {title}
           </h3>
-          <p className="text-xs sm:text-sm text-slate-400 font-medium">
+          <p className="text-xs text-slate-400 font-medium">
             {subtitle}
           </p>
         </div>
 
-        {/* Action Button Badge */}
-        <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-blue-600/25 transition-all">
-          <FilePlus className="w-4 h-4" />
+        <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/25 transition-all">
+          <FilePlus className="w-3.5 h-3.5" />
           <span>{multiple ? 'Choose Files' : 'Select File'}</span>
         </div>
       </div>
