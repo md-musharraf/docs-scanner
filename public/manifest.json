@@ -1,0 +1,17 @@
+{
+  "name": "DocuCraft PDF - Offline PDF Studio",
+  "short_name": "DocuCraft PDF",
+  "description": "100% Offline Camera Document Scanner, PDF Merge, Split & Converter",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#0f172a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192' fill='%232563eb'><rect width='192' height='192' rx='40' fill='%230f172a'/><path d='M60 40h48l36 36v76a8 8 0 0 1-8 8H60a8 8 0 0 1-8-8V48a8 8 0 0 1 8-8z' fill='%232563eb'/><path d='M108 40v36h36' fill='%2360a5fa'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

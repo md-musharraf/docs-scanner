@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DocuCraft PDF</string>
+    <string name="title_activity_main">DocuCraft PDF</string>
+    <string name="package_name">com.docucraft.pdfstudio</string>
+    <string name="custom_url_scheme">com.docucraft.pdfstudio</string>
+</resources>
