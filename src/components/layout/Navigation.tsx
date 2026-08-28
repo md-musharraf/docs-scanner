@@ -1,7 +1,7 @@
 import React from 'react';
-import { Camera, Layers, Scissors, Image as ImageIcon, FileStack, SlidersHorizontal, FolderArchive } from 'lucide-react';
+import { Camera, Layers, Scissors, Image as ImageIcon, FileStack, SlidersHorizontal, FolderArchive, Minimize2 } from 'lucide-react';
 
-export type ActiveTab = 'scan' | 'merge' | 'split' | 'pdf2img' | 'img2pdf' | 'tools' | 'saved';
+export type ActiveTab = 'scan' | 'resize' | 'merge' | 'split' | 'pdf2img' | 'img2pdf' | 'tools' | 'saved';
 
 interface NavigationProps {
   activeTab: ActiveTab;
@@ -12,6 +12,7 @@ interface NavigationProps {
 export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab, savedCount }) => {
   const tabs = [
     { id: 'scan' as ActiveTab, label: 'Scanner', icon: Camera, highlight: true },
+    { id: 'resize' as ActiveTab, label: 'Resize', icon: Minimize2 },
     { id: 'merge' as ActiveTab, label: 'Merge', icon: Layers },
     { id: 'split' as ActiveTab, label: 'Split', icon: Scissors },
     { id: 'pdf2img' as ActiveTab, label: 'PDF to Img', icon: ImageIcon },

@@ -8,6 +8,7 @@ import { SplitPdfTool } from './components/tools/SplitPdfTool';
 import { PdfToImageTool } from './components/tools/PdfToImageTool';
 import { ImageToPdfTool } from './components/tools/ImageToPdfTool';
 import { PdfTools } from './components/tools/PdfTools';
+import { ResizeCompressTool } from './components/tools/ResizeCompressTool';
 import { SavedDocsView } from './components/tools/SavedDocsView';
 import { getAllSavedDocuments } from './lib/storage';
 import type { SavedDocumentMetadata } from './core/types';
@@ -96,6 +97,9 @@ export function AppContent() {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 md:p-8">
         {activeTab === 'scan' && (
           <CameraScanner onDocumentSaved={refreshSavedDocs} />
+        )}
+        {activeTab === 'resize' && (
+          <ResizeCompressTool onDocumentSaved={refreshSavedDocs} />
         )}
         {activeTab === 'merge' && (
           <MergePdfTool onDocumentSaved={refreshSavedDocs} />
