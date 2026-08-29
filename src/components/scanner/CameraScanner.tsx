@@ -8,6 +8,10 @@ import {
   Plus,
   FileCheck,
   Crop,
+  ChevronLeft,
+  ChevronRight,
+  RotateCw,
+  Sparkles,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import type { ScannerFilter, ScannedPageItem } from '../../core/types';
@@ -15,6 +19,11 @@ import { APP_CONFIG } from '../../core/constants';
 import { generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
 import { imagesToPDF } from '../../lib/pdfEngine';
 import { saveDocumentLocally } from '../../lib/storage';
+import {
+  autoDetectDocumentCorners,
+  warpPerspectiveCrop,
+} from '../../lib/perspectiveTransform';
+import { applyImageFilter, loadImageElement } from '../../lib/imageFilters';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { CropModal } from './CropModal';
 import { useToast } from '../../hooks/useToast';
@@ -37,6 +46,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   const [torchOn, setTorchOn] = useState(false);
   const [pages, setPages] = useState<ScannedPageItem[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [showShutterFlash, setShowShutterFlash] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [docName, setDocName] = useState(() => generateDefaultDocName('Scan'));
 
@@ -125,9 +135,25 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     }
   };
 
+  const triggerHaptic = () => {
+    try {
+      if (navigator.vibrate) {
+        navigator.vibrate(40);
+      }
+    } catch {
+      // Ignore vibration error
+    }
+  };
+
   const handleCapture = async () => {
     if (!videoRef.current) return;
     setIsCapturing(true);
+    triggerHaptic();
+
+    // Trigger visual shutter flash
+    setShowShutterFlash(true);
+    setTimeout(() => setShowShutterFlash(false), 120);
+
     try {
       const video = videoRef.current;
       const canvas = document.createElement('canvas');
@@ -154,9 +180,18 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     }
   };
 
-  const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
+  const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const fileList = Array.from(e.target.files).filter((f) => f.type.startsWith('image/'));
+    e.target.value = '';
+
+    if (fileList.length === 0) {
+      showToast('Please select image files', 'error');
+      return;
+    }
+
+    if (fileList.length === 1) {
+      // Single file -> Open interactive crop modal
       const reader = new FileReader();
       reader.onload = (event) => {
         const rawUrl = event.target?.result as string;
@@ -164,8 +199,51 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         setCurrentRawCapture(rawUrl);
         setCropModalOpen(true);
       };
-      reader.readAsDataURL(file);
-      e.target.value = '';
+      reader.readAsDataURL(fileList[0]);
+    } else {
+      // Multi-file batch import -> Auto-process and add all directly
+      showToast(`Importing ${fileList.length} photos...`, 'info');
+      try {
+        const newBatch: ScannedPageItem[] = [];
+
+        for (const file of fileList) {
+          const rawUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(file);
+          });
+
+          const img = await loadImageElement(rawUrl);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const corners = autoDetectDocumentCorners(canvas);
+            const croppedCanvas = warpPerspectiveCrop(canvas, corners);
+            const processedUrl = await applyImageFilter(croppedCanvas, 'bw_document');
+
+            newBatch.push({
+              id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              originalDataUrl: rawUrl,
+              processedDataUrl: processedUrl,
+              filter: 'bw_document',
+            });
+
+            canvas.width = 0;
+            canvas.height = 0;
+            croppedCanvas.width = 0;
+            croppedCanvas.height = 0;
+          }
+        }
+
+        setPages((prev) => [...prev, ...newBatch]);
+        showToast(`Added ${newBatch.length} scanned pages!`, 'success');
+      } catch (err) {
+        logger.error('CameraScanner', 'Error importing batch', err);
+        showToast('Error importing photos', 'error');
+      }
     }
   };
 
@@ -204,7 +282,62 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     }
   };
 
-  const handleDeletePage = (idx: number) => {
+  const handleRotatePage = async (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerHaptic();
+    const page = pages[idx];
+    if (!page) return;
+
+    try {
+      const img = await loadImageElement(page.processedDataUrl);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((90 * Math.PI) / 180);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        const newUrl = canvas.toDataURL('image/jpeg', 0.94);
+        setPages((prev) =>
+          prev.map((p, i) => (i === idx ? { ...p, processedDataUrl: newUrl } : p))
+        );
+        showToast(`Page ${idx + 1} rotated`, 'info');
+      }
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch (err) {
+      logger.error('CameraScanner', 'Error rotating page', err);
+    }
+  };
+
+  const movePageLeft = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (idx === 0) return;
+    setPages((prev) => {
+      const updated = [...prev];
+      const temp = updated[idx];
+      updated[idx] = updated[idx - 1];
+      updated[idx - 1] = temp;
+      return updated;
+    });
+  };
+
+  const movePageRight = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (idx === pages.length - 1) return;
+    setPages((prev) => {
+      const updated = [...prev];
+      const temp = updated[idx];
+      updated[idx] = updated[idx + 1];
+      updated[idx + 1] = temp;
+      return updated;
+    });
+  };
+
+  const handleDeletePage = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerHaptic();
     setPages((prev) => prev.filter((_, i) => i !== idx));
     showToast('Page removed', 'info');
   };
@@ -248,7 +381,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   };
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto space-y-4 pb-28 md:pb-6">
+    <div className="flex flex-col h-full max-w-4xl mx-auto space-y-4 pb-28 md:pb-6 animate-in fade-in duration-300">
       {/* Top Controls & Document Name Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 p-3 rounded-2xl border border-slate-800 backdrop-blur-md">
         <div className="flex items-center space-x-2 flex-1 min-w-[180px]">
@@ -287,6 +420,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
 
       {/* Main Viewfinder / Camera Container */}
       <div className="relative w-full aspect-[3/4] sm:aspect-[4/3] max-h-[55vh] bg-slate-950 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+        {/* Shutter flash animation */}
+        {showShutterFlash && (
+          <div className="absolute inset-0 bg-white z-40 pointer-events-none animate-out fade-out duration-150"></div>
+        )}
+
         {/* Live Camera View */}
         <video
           ref={videoRef}
@@ -316,8 +454,8 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         {/* Floating Top In-Camera Bar */}
         <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10">
           <div className="px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-xs font-semibold text-white/90 flex items-center space-x-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Auto-Cut & Light AI</span>
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Auto-Cut & Sauvola AI</span>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -347,14 +485,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
             <div className="max-w-xs space-y-1">
               <h4 className="text-base font-semibold text-white">Camera Access Offline</h4>
               <p className="text-xs text-slate-400">
-                You can capture or upload photos from device gallery.
+                You can capture or upload multiple photos from device gallery.
               </p>
             </div>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-lg shadow-blue-600/30 cursor-pointer"
             >
-              Upload Photo from Gallery
+              Upload Photos from Gallery
             </button>
           </div>
         )}
@@ -366,13 +504,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple={true}
           className="hidden"
           onChange={handleGalleryUpload}
         />
         <button
           onClick={() => fileInputRef.current?.click()}
           className="flex flex-col items-center justify-center p-3 rounded-2xl bg-slate-900/80 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition-all active:scale-95 cursor-pointer"
-          title="Import from Gallery"
+          title="Import multiple from Gallery"
         >
           <Plus className="w-5 h-5 text-blue-400" />
           <span className="text-[10px] font-semibold mt-1">Gallery</span>
@@ -409,14 +548,14 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         )}
       </div>
 
-      {/* Scanned Pages Batch Thumbnail Strip */}
+      {/* Scanned Pages Batch Thumbnail Strip with Re-Ordering & Quick Rotate */}
       {pages.length > 0 && (
         <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-3 backdrop-blur-md space-y-2">
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-semibold text-slate-300">
               Scanned Pages ({pages.length})
             </span>
-            <span className="text-[11px] text-slate-500">Tap page to re-crop or adjust light</span>
+            <span className="text-[11px] text-slate-500">Tap to edit / re-crop • Use arrows to reorder</span>
           </div>
 
           <div className="flex items-center space-x-3 overflow-x-auto py-1 pb-2">
@@ -424,36 +563,64 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
               <div
                 key={page.id}
                 onClick={() => handleEditPage(idx)}
-                className="relative flex-shrink-0 w-24 h-32 rounded-xl overflow-hidden border-2 border-slate-800 hover:border-blue-500 transition-all cursor-pointer group bg-slate-950"
+                className="relative flex-shrink-0 w-28 h-38 rounded-xl overflow-hidden border-2 border-slate-800 hover:border-blue-500 transition-all cursor-pointer group bg-slate-950 flex flex-col justify-between"
               >
-                <img
-                  src={page.processedDataUrl}
-                  alt={`Page ${idx + 1}`}
-                  className="w-full h-full object-cover"
-                />
+                <div className="flex-1 w-full overflow-hidden relative">
+                  <img
+                    src={page.processedDataUrl}
+                    alt={`Page ${idx + 1}`}
+                    className="w-full h-full object-contain"
+                  />
 
-                {/* Page Number Badge */}
-                <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-bold text-white backdrop-blur-sm">
-                  {idx + 1}
+                  {/* Page Number Badge */}
+                  <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-bold text-white backdrop-blur-sm">
+                    {idx + 1}
+                  </div>
+
+                  {/* Quick Rotate Button */}
+                  <button
+                    onClick={(e) => handleRotatePage(idx, e)}
+                    className="absolute top-1 right-1 p-1 rounded-md bg-black/70 hover:bg-blue-600 text-white transition-colors cursor-pointer"
+                    title="Rotate 90°"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                  </button>
+
+                  {/* Crop badge */}
+                  <div className="absolute bottom-1 left-1 p-0.5 px-1 rounded bg-blue-600/90 text-white text-[9px] font-semibold flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Crop className="w-2.5 h-2.5" />
+                    <span>Crop</span>
+                  </div>
                 </div>
 
-                {/* Edit / Crop Indicator */}
-                <div className="absolute bottom-1.5 left-1.5 p-1 rounded bg-blue-600/80 text-white text-[9px] font-semibold flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Crop className="w-3 h-3" />
-                  <span>Crop</span>
-                </div>
+                {/* Bottom reorder bar */}
+                <div className="p-1 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
+                  <button
+                    onClick={(e) => movePageLeft(idx, e)}
+                    disabled={idx === 0}
+                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-20 cursor-pointer"
+                    title="Move Left"
+                  >
+                    <ChevronLeft className="w-3 h-3" />
+                  </button>
 
-                {/* Delete button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeletePage(idx);
-                  }}
-                  className="absolute top-1.5 right-1.5 p-1 rounded bg-red-600/80 hover:bg-red-600 text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                  title="Remove page"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                  <button
+                    onClick={(e) => handleDeletePage(idx, e)}
+                    className="p-1 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
+                    title="Delete page"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+
+                  <button
+                    onClick={(e) => movePageRight(idx, e)}
+                    disabled={idx === pages.length - 1}
+                    className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-20 cursor-pointer"
+                    title="Move Right"
+                  >
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

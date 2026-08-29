@@ -12,7 +12,11 @@ export function euclideanDistance(p1: Point, p2: Point): number {
 /**
  * Get default quad corners with an optional margin percentage
  */
-export function calculateDefaultCorners(width: number, height: number, marginRatio: number = 0.04): CornerQuad {
+export function calculateDefaultCorners(
+  width: number,
+  height: number,
+  marginRatio: number = 0.04
+): CornerQuad {
   const mx = width * marginRatio;
   const my = height * marginRatio;
   return {
@@ -34,20 +38,151 @@ export function clampPoint(p: Point, width: number, height: number): Point {
 }
 
 /**
- * Validates if the quadrilateral has plausible geometric dimensions for a document
+ * Check if a 4-point polygon is strictly convex
  */
-export function isValidQuad(quad: CornerQuad, width: number, height: number, minRatio: number = 0.2): boolean {
+export function isConvexPolygon(points: Point[]): boolean {
+  if (points.length < 4) return false;
+  let sign = 0;
+
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    const p3 = points[(i + 2) % points.length];
+
+    const dx1 = p2.x - p1.x;
+    const dy1 = p2.y - p1.y;
+    const dx2 = p3.x - p2.x;
+    const dy2 = p3.y - p2.y;
+
+    const crossProduct = dx1 * dy2 - dy1 * dx2;
+    if (crossProduct !== 0) {
+      const currentSign = crossProduct > 0 ? 1 : -1;
+      if (sign === 0) {
+        sign = currentSign;
+      } else if (sign !== currentSign) {
+        return false; // Cross products have different signs -> concave or self-intersecting
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Calculate polygon area using Shoelace formula
+ */
+export function polygonArea(points: Point[]): number {
+  let area = 0;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * Validates if the quadrilateral has plausible geometric dimensions and convexity for a document
+ */
+export function isValidQuad(
+  quad: CornerQuad,
+  width: number,
+  height: number,
+  minRatio: number = 0.15
+): boolean {
   const widthTop = euclideanDistance(quad.topLeft, quad.topRight);
   const widthBot = euclideanDistance(quad.bottomLeft, quad.bottomRight);
   const heightLeft = euclideanDistance(quad.topLeft, quad.bottomLeft);
   const heightRight = euclideanDistance(quad.topRight, quad.bottomRight);
 
-  return (
-    widthTop >= width * minRatio &&
-    widthBot >= width * minRatio &&
-    heightLeft >= height * minRatio &&
-    heightRight >= height * minRatio
-  );
+  const minW = width * minRatio;
+  const minH = height * minRatio;
+
+  if (widthTop < minW || widthBot < minW || heightLeft < minH || heightRight < minH) {
+    return false;
+  }
+
+  const points = [quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft];
+  return isConvexPolygon(points);
+}
+
+/**
+ * Get the midpoints of the four edges of a quadrilateral
+ */
+export function getQuadMidpoints(quad: CornerQuad): {
+  top: Point;
+  right: Point;
+  bottom: Point;
+  left: Point;
+} {
+  return {
+    top: {
+      x: (quad.topLeft.x + quad.topRight.x) / 2,
+      y: (quad.topLeft.y + quad.topRight.y) / 2,
+    },
+    right: {
+      x: (quad.topRight.x + quad.bottomRight.x) / 2,
+      y: (quad.topRight.y + quad.bottomRight.y) / 2,
+    },
+    bottom: {
+      x: (quad.bottomLeft.x + quad.bottomRight.x) / 2,
+      y: (quad.bottomLeft.y + quad.bottomRight.y) / 2,
+    },
+    left: {
+      x: (quad.topLeft.x + quad.bottomLeft.x) / 2,
+      y: (quad.topLeft.y + quad.bottomLeft.y) / 2,
+    },
+  };
+}
+
+/**
+ * Rotate a quad clockwise by 90, 180, or 270 degrees around image dimensions
+ */
+export function rotateQuad(
+  quad: CornerQuad,
+  angleDegrees: number,
+  srcWidth: number,
+  srcHeight: number
+): CornerQuad {
+  const normAngle = ((angleDegrees % 360) + 360) % 360;
+  if (normAngle === 0) return { ...quad };
+
+  const rotatePoint = (p: Point): Point => {
+    if (normAngle === 90) {
+      return { x: srcHeight - p.y, y: p.x };
+    } else if (normAngle === 180) {
+      return { x: srcWidth - p.x, y: srcHeight - p.y };
+    } else if (normAngle === 270) {
+      return { x: p.y, y: srcWidth - p.x };
+    }
+    return p;
+  };
+
+  if (normAngle === 90) {
+    return {
+      topLeft: rotatePoint(quad.bottomLeft),
+      topRight: rotatePoint(quad.topLeft),
+      bottomRight: rotatePoint(quad.topRight),
+      bottomLeft: rotatePoint(quad.bottomRight),
+    };
+  } else if (normAngle === 180) {
+    return {
+      topLeft: rotatePoint(quad.bottomRight),
+      topRight: rotatePoint(quad.bottomLeft),
+      bottomRight: rotatePoint(quad.topLeft),
+      bottomLeft: rotatePoint(quad.topRight),
+    };
+  } else if (normAngle === 270) {
+    return {
+      topLeft: rotatePoint(quad.topRight),
+      topRight: rotatePoint(quad.bottomRight),
+      bottomRight: rotatePoint(quad.bottomLeft),
+      bottomLeft: rotatePoint(quad.topLeft),
+    };
+  }
+
+  return { ...quad };
 }
 
 /**

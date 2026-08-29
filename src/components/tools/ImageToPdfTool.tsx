@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileStack, ArrowUp, ArrowDown, Trash2, FileCheck } from 'lucide-react';
+import { FileStack, ArrowUp, ArrowDown, Trash2, FileCheck, RotateCw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
 import { imagesToPDF } from '../../lib/pdfEngine';
@@ -35,7 +35,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
   const [generatedPdf, setGeneratedPdf] = useState<Uint8Array | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  const handleFilesSelected = (files: File[]) => {
+  const handleFilesSelected = async (files: File[]) => {
     const imgFiles = files.filter((f) => f.type.startsWith('image/'));
 
     if (imgFiles.length === 0) {
@@ -43,25 +43,59 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
       return;
     }
 
-    imgFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        setImages((prev) => [
-          ...prev,
-          {
-            id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            file,
-            dataUrl,
-            name: file.name,
-            size: file.size,
-          },
-        ]);
-      };
-      reader.readAsDataURL(file);
-    });
+    try {
+      const loadedItems: ImageFileItem[] = await Promise.all(
+        imgFiles.map(
+          (file) =>
+            new Promise<ImageFileItem>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const dataUrl = e.target?.result as string;
+                resolve({
+                  id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                  file,
+                  dataUrl,
+                  name: file.name,
+                  size: file.size,
+                });
+              };
+              reader.readAsDataURL(file);
+            })
+        )
+      );
 
-    showToast(`Added ${imgFiles.length} photo${imgFiles.length > 1 ? 's' : ''}`, 'success');
+      setImages((prev) => [...prev, ...loadedItems]);
+      showToast(`Added ${imgFiles.length} photo${imgFiles.length > 1 ? 's' : ''}`, 'success');
+    } catch (err) {
+      logger.error('ImageToPdfTool', 'Error loading files', err);
+      showToast('Error loading photos', 'error');
+    }
+  };
+
+  const handleRotateImage = async (index: number) => {
+    const target = images[index];
+    if (!target) return;
+
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalHeight;
+      canvas.height = img.naturalWidth;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((90 * Math.PI) / 180);
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        const newUrl = canvas.toDataURL('image/jpeg', 0.94);
+        setImages((prev) =>
+          prev.map((item, idx) => (idx === index ? { ...item, dataUrl: newUrl } : item))
+        );
+        showToast(`Image ${index + 1} rotated`, 'info');
+      }
+      canvas.width = 0;
+      canvas.height = 0;
+    };
+    img.src = target.dataUrl;
   };
 
   const moveUp = (index: number) => {
@@ -247,9 +281,17 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
 
                   <div className="flex items-center space-x-1">
                     <button
+                      onClick={() => handleRotateImage(idx)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 cursor-pointer"
+                      title="Rotate 90°"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       onClick={() => moveUp(idx)}
                       disabled={idx === 0}
                       className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
+                      title="Move Up"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
                     </button>
@@ -257,12 +299,14 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
                       onClick={() => moveDown(idx)}
                       disabled={idx === images.length - 1}
                       className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
+                      title="Move Down"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => removeImage(img.id)}
                       className="p-1 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
+                      title="Delete Image"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

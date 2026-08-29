@@ -6,6 +6,9 @@ export interface ResizeCompressOptions {
   quality?: number; // 0.01 to 1.0
   maxWidth?: number;
   maxHeight?: number;
+  exactWidth?: number;
+  exactHeight?: number;
+  fitMode?: 'contain' | 'cover' | 'stretch';
   scale?: number; // 0.1 to 1.0
   format?: 'image/jpeg' | 'image/png' | 'image/webp';
 }
@@ -24,7 +27,7 @@ export interface CompressionResult {
 /**
  * Intelligent Target Size Compressor:
  * Uses iterative binary-search on JPEG/WebP quality and proportional dimension scaling
- * to reach target file size (e.g., 10KB, 50KB, 100KB, 200KB) with maximum visual clarity.
+ * to reach target file size (e.g., 10KB, 20KB, 50KB, 100KB, 200KB) with maximum visual clarity.
  */
 export async function compressImageToTargetKB(
   source: string | File | HTMLImageElement,
@@ -43,7 +46,7 @@ export async function compressImageToTargetKB(
     URL.revokeObjectURL(url);
   } else if (typeof source === 'string') {
     img = await loadImageElement(source);
-    originalSizeBytes = Math.round((source.length * 3) / 4); // Approx base64 byte size
+    originalSizeBytes = Math.round((source.length * 3) / 4);
   } else {
     img = source;
     originalSizeBytes = img.naturalWidth * img.naturalHeight * 4;
@@ -53,8 +56,7 @@ export async function compressImageToTargetKB(
   let currentWidth = img.naturalWidth;
   let currentHeight = img.naturalHeight;
 
-  // Step 1: Determine safe initial dimension based on target size threshold
-  // Extremely small targets (e.g. <= 25KB) cannot be achieved with 4K images due to JPEG header overhead
+  // Initial dimension capping based on extreme size constraints
   if (targetKB <= 15) {
     const maxDim = 640;
     if (currentWidth > maxDim || currentHeight > maxDim) {
@@ -76,13 +78,6 @@ export async function compressImageToTargetKB(
       currentWidth = Math.round(currentWidth * s);
       currentHeight = Math.round(currentHeight * s);
     }
-  } else if (targetKB <= 300) {
-    const maxDim = 1920;
-    if (currentWidth > maxDim || currentHeight > maxDim) {
-      const s = Math.min(maxDim / currentWidth, maxDim / currentHeight);
-      currentWidth = Math.round(currentWidth * s);
-      currentHeight = Math.round(currentHeight * s);
-    }
   }
 
   const canvas = document.createElement('canvas');
@@ -91,9 +86,11 @@ export async function compressImageToTargetKB(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D context not available');
 
+  // Fill pure white background for transparent image safety
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, currentWidth, currentHeight);
   ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
 
-  // Helper to convert canvas to blob promise
   const getBlob = (q: number): Promise<Blob> =>
     new Promise((resolve, reject) => {
       canvas.toBlob(
@@ -106,7 +103,7 @@ export async function compressImageToTargetKB(
       );
     });
 
-  // Step 2: Binary Search for optimal compression quality
+  // Binary Search for optimal compression quality
   let minQ = 0.02;
   let maxQ = 0.96;
   let bestBlob: Blob | null = null;
@@ -125,14 +122,16 @@ export async function compressImageToTargetKB(
     }
   }
 
-  // Step 3: If still exceeding targetBytes (even at min quality), downscale dimensions further
+  // If still exceeding targetBytes (even at lowest quality), downscale dimensions further
   if (!bestBlob || bestBlob.size > targetBytes) {
     let scaleFactor = 0.85;
-    for (let iter = 0; iter < 4; iter++) {
-      currentWidth = Math.max(100, Math.round(currentWidth * scaleFactor));
-      currentHeight = Math.max(100, Math.round(currentHeight * scaleFactor));
+    for (let iter = 0; iter < 5; iter++) {
+      currentWidth = Math.max(80, Math.round(currentWidth * scaleFactor));
+      currentHeight = Math.max(80, Math.round(currentHeight * scaleFactor));
       canvas.width = currentWidth;
       canvas.height = currentHeight;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, currentWidth, currentHeight);
       ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
 
       const blob = await getBlob(Math.max(0.1, bestQuality));
@@ -147,7 +146,6 @@ export async function compressImageToTargetKB(
   const finalBlob = bestBlob || (await getBlob(0.1));
   const dataUrl = await blobToDataUrl(finalBlob);
 
-  // Clean canvas memory
   canvas.width = 0;
   canvas.height = 0;
 
@@ -171,7 +169,7 @@ export async function compressImageToTargetKB(
 }
 
 /**
- * Manual Dimension Resize & Quality Compressor
+ * Manual Dimension Resize, Aspect Ratio Cropping, and Quality Compressor
  */
 export async function resizeAndCompressImage(
   source: string | File | HTMLImageElement,
@@ -196,15 +194,45 @@ export async function resizeAndCompressImage(
   let targetW = img.naturalWidth;
   let targetH = img.naturalHeight;
 
-  if (options.scale !== undefined && options.scale > 0 && options.scale <= 1) {
+  let drawX = 0;
+  let drawY = 0;
+  let drawW = targetW;
+  let drawH = targetH;
+
+  if (options.exactWidth && options.exactHeight) {
+    targetW = options.exactWidth;
+    targetH = options.exactHeight;
+
+    const fitMode = options.fitMode || 'cover';
+    if (fitMode === 'cover') {
+      const scale = Math.max(targetW / img.naturalWidth, targetH / img.naturalHeight);
+      drawW = Math.round(img.naturalWidth * scale);
+      drawH = Math.round(img.naturalHeight * scale);
+      drawX = Math.round((targetW - drawW) / 2);
+      drawY = Math.round((targetH - drawH) / 2);
+    } else if (fitMode === 'contain') {
+      const scale = Math.min(targetW / img.naturalWidth, targetH / img.naturalHeight);
+      drawW = Math.round(img.naturalWidth * scale);
+      drawH = Math.round(img.naturalHeight * scale);
+      drawX = Math.round((targetW - drawW) / 2);
+      drawY = Math.round((targetH - drawH) / 2);
+    } else {
+      drawW = targetW;
+      drawH = targetH;
+    }
+  } else if (options.scale !== undefined && options.scale > 0 && options.scale <= 1) {
     targetW = Math.round(img.naturalWidth * options.scale);
     targetH = Math.round(img.naturalHeight * options.scale);
+    drawW = targetW;
+    drawH = targetH;
   } else if (options.maxWidth || options.maxHeight) {
     const maxW = options.maxWidth || img.naturalWidth;
     const maxH = options.maxHeight || img.naturalHeight;
     const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
     targetW = Math.round(img.naturalWidth * scale);
     targetH = Math.round(img.naturalHeight * scale);
+    drawW = targetW;
+    drawH = targetH;
   }
 
   targetW = Math.max(10, targetW);
@@ -216,7 +244,11 @@ export async function resizeAndCompressImage(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D context not available');
 
-  ctx.drawImage(img, 0, 0, targetW, targetH);
+  // Fill white canvas background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, targetW, targetH);
+
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
 
   const format = options.format || 'image/jpeg';
   const quality = options.quality !== undefined ? options.quality : 0.85;

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   Wand2,
   Maximize,
@@ -6,13 +6,19 @@ import {
   Sun,
   Check,
   X,
+  Sparkles,
 } from 'lucide-react';
 import {
   autoDetectDocumentCorners,
   calculateDefaultCorners,
   warpPerspectiveCrop,
 } from '../../lib/perspectiveTransform';
-import type { CornerQuad, ScannerFilter } from '../../core/types';
+import type { CornerQuad, ScannerFilter, Point } from '../../core/types';
+import {
+  rotateQuad,
+  getQuadMidpoints,
+  clampPoint,
+} from '../../utils/geometry';
 import { applyImageFilter, loadImageElement } from '../../lib/imageFilters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
@@ -23,6 +29,11 @@ interface CropModalProps {
   onClose: () => void;
   onApplyCrop: (processedDataUrl: string, originalDataUrl: string, filter: ScannerFilter) => void;
 }
+
+type DragTarget =
+  | { type: 'corner'; key: keyof CornerQuad }
+  | { type: 'edge'; key: 'top' | 'right' | 'bottom' | 'left'; startPos: Point; startCorners: CornerQuad }
+  | null;
 
 export const CropModal: React.FC<CropModalProps> = ({
   isOpen,
@@ -44,7 +55,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   });
 
   const [corners, setCorners] = useState<CornerQuad | null>(null);
-  const [draggingCorner, setDraggingCorner] = useState<keyof CornerQuad | null>(null);
+  const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const [dragClientPos, setDragClientPos] = useState<{ x: number; y: number } | null>(null);
   const [activeFilter, setActiveFilter] = useState<ScannerFilter>('bw_document');
   const [autoLight, setAutoLight] = useState(true);
@@ -54,7 +65,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [showLightingControls, setShowLightingControls] = useState(false);
 
-  // Load and auto-detect corners on open
+  // Load image and detect corners
   useEffect(() => {
     if (!isOpen || !imageSrc) return;
     let isMounted = true;
@@ -62,11 +73,14 @@ export const CropModal: React.FC<CropModalProps> = ({
     loadImageElement(imageSrc)
       .then((img) => {
         if (!isMounted) return;
-        setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+        setRotationAngle(0);
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        setNaturalSize({ width: w, height: h });
 
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
+        canvas.width = w;
+        canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0);
@@ -88,47 +102,54 @@ export const CropModal: React.FC<CropModalProps> = ({
     };
   }, [isOpen, imageSrc, showToast]);
 
-  // Recalculate display size on window resize
-  useEffect(() => {
-    const updateBounds = () => {
-      if (imageRef.current) {
-        const rect = imageRef.current.getBoundingClientRect();
-        setDisplaySize({
-          width: rect.width,
-          height: rect.height,
-          left: rect.left,
-          top: rect.top,
-        });
-      }
-    };
+  // Recalculate display bounds
+  const updateBounds = useCallback(() => {
+    if (imageRef.current) {
+      const rect = imageRef.current.getBoundingClientRect();
+      setDisplaySize({
+        width: rect.width,
+        height: rect.height,
+        left: rect.left,
+        top: rect.top,
+      });
+    }
+  }, []);
 
+  useEffect(() => {
     updateBounds();
     window.addEventListener('resize', updateBounds);
     return () => window.removeEventListener('resize', updateBounds);
-  }, [naturalSize, rotationAngle]);
+  }, [naturalSize, rotationAngle, updateBounds]);
 
   // Update Magnifying Loupe Canvas on Drag
   useEffect(() => {
-    if (!draggingCorner || !corners || !imageRef.current || !loupeCanvasRef.current) return;
+    if (!dragTarget || !corners || !imageRef.current || !loupeCanvasRef.current) return;
 
     const loupe = loupeCanvasRef.current;
     const lCtx = loupe.getContext('2d');
     if (!lCtx) return;
 
-    const pt = corners[draggingCorner];
+    let targetPt: Point;
+    if (dragTarget.type === 'corner') {
+      targetPt = corners[dragTarget.key];
+    } else {
+      const midpoints = getQuadMidpoints(corners);
+      targetPt = midpoints[dragTarget.key];
+    }
+
     const zoom = 2.5;
-    const loupeSize = 100;
+    const loupeSize = 110;
     loupe.width = loupeSize;
     loupe.height = loupeSize;
 
     lCtx.clearRect(0, 0, loupeSize, loupeSize);
 
-    // Draw zoomed portion of source image
+    // Draw zoomed source section
     const sourceRadius = (loupeSize / zoom) / 2;
     lCtx.drawImage(
       imageRef.current,
-      pt.x - sourceRadius,
-      pt.y - sourceRadius,
+      targetPt.x - sourceRadius,
+      targetPt.y - sourceRadius,
       sourceRadius * 2,
       sourceRadius * 2,
       0,
@@ -137,7 +158,7 @@ export const CropModal: React.FC<CropModalProps> = ({
       loupeSize
     );
 
-    // Draw Crosshair in Loupe
+    // Crosshairs
     lCtx.strokeStyle = '#38bdf8';
     lCtx.lineWidth = 1.5;
     lCtx.beginPath();
@@ -147,12 +168,12 @@ export const CropModal: React.FC<CropModalProps> = ({
     lCtx.lineTo(loupeSize, loupeSize / 2);
     lCtx.stroke();
 
-    // Center dot
+    // Center focal point
     lCtx.fillStyle = '#ef4444';
     lCtx.beginPath();
-    lCtx.arc(loupeSize / 2, loupeSize / 2, 3, 0, Math.PI * 2);
+    lCtx.arc(loupeSize / 2, loupeSize / 2, 3.5, 0, Math.PI * 2);
     lCtx.fill();
-  }, [draggingCorner, corners]);
+  }, [dragTarget, corners]);
 
   const toDisplayX = (x: number) => {
     if (!naturalSize.width) return x;
@@ -178,39 +199,83 @@ export const CropModal: React.FC<CropModalProps> = ({
     return (clamped / displaySize.height) * naturalSize.height;
   };
 
-  const handlePointerDown = (cornerKey: keyof CornerQuad, e: React.PointerEvent) => {
+  const handleCornerPointerDown = (cornerKey: keyof CornerQuad, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDraggingCorner(cornerKey);
+    setDragTarget({ type: 'corner', key: cornerKey });
+    setDragClientPos({ x: e.clientX, y: e.clientY });
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handleEdgePointerDown = (edgeKey: 'top' | 'right' | 'bottom' | 'left', e: React.PointerEvent) => {
+    if (!corners) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const currentNatX = toNaturalX(e.clientX);
+    const currentNatY = toNaturalY(e.clientY);
+
+    setDragTarget({
+      type: 'edge',
+      key: edgeKey,
+      startPos: { x: currentNatX, y: currentNatY },
+      startCorners: { ...corners },
+    });
     setDragClientPos({ x: e.clientX, y: e.clientY });
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!draggingCorner || !corners) return;
+    if (!dragTarget || !corners) return;
     e.preventDefault();
     setDragClientPos({ x: e.clientX, y: e.clientY });
 
     const natX = toNaturalX(e.clientX);
     const natY = toNaturalY(e.clientY);
 
-    setCorners((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        [draggingCorner]: { x: natX, y: natY },
-      };
-    });
+    if (dragTarget.type === 'corner') {
+      const cornerKey = dragTarget.key;
+      setCorners((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [cornerKey]: clampPoint({ x: natX, y: natY }, naturalSize.width, naturalSize.height),
+        };
+      });
+    } else {
+      // Edge drag: move both attached corners simultaneously
+      const dx = natX - dragTarget.startPos.x;
+      const dy = natY - dragTarget.startPos.y;
+      const base = dragTarget.startCorners;
+
+      setCorners((prev) => {
+        if (!prev) return prev;
+        const updated = { ...prev };
+        if (dragTarget.key === 'top') {
+          updated.topLeft = clampPoint({ x: base.topLeft.x + dx, y: base.topLeft.y + dy }, naturalSize.width, naturalSize.height);
+          updated.topRight = clampPoint({ x: base.topRight.x + dx, y: base.topRight.y + dy }, naturalSize.width, naturalSize.height);
+        } else if (dragTarget.key === 'right') {
+          updated.topRight = clampPoint({ x: base.topRight.x + dx, y: base.topRight.y + dy }, naturalSize.width, naturalSize.height);
+          updated.bottomRight = clampPoint({ x: base.bottomRight.x + dx, y: base.bottomRight.y + dy }, naturalSize.width, naturalSize.height);
+        } else if (dragTarget.key === 'bottom') {
+          updated.bottomLeft = clampPoint({ x: base.bottomLeft.x + dx, y: base.bottomLeft.y + dy }, naturalSize.width, naturalSize.height);
+          updated.bottomRight = clampPoint({ x: base.bottomRight.x + dx, y: base.bottomRight.y + dy }, naturalSize.width, naturalSize.height);
+        } else if (dragTarget.key === 'left') {
+          updated.topLeft = clampPoint({ x: base.topLeft.x + dx, y: base.topLeft.y + dy }, naturalSize.width, naturalSize.height);
+          updated.bottomLeft = clampPoint({ x: base.bottomLeft.x + dx, y: base.bottomLeft.y + dy }, naturalSize.width, naturalSize.height);
+        }
+        return updated;
+      });
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (draggingCorner) {
-      setDraggingCorner(null);
+    if (dragTarget) {
+      setDragTarget(null);
       setDragClientPos(null);
       try {
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
       } catch {
-        // Pointer capture release safeguard
+        // Pointer capture safeguard
       }
     }
   };
@@ -230,7 +295,7 @@ export const CropModal: React.FC<CropModalProps> = ({
       }
       canvas.width = 0;
       canvas.height = 0;
-      showToast('Document corners detected', 'info');
+      showToast('Document boundary auto-detected', 'success');
     };
     img.src = imageSrc;
   };
@@ -242,6 +307,11 @@ export const CropModal: React.FC<CropModalProps> = ({
   };
 
   const handleRotate = () => {
+    if (!corners || !naturalSize.width) return;
+    // Rotate quad points by 90 deg clockwise
+    const nextQuad = rotateQuad(corners, 90, naturalSize.width, naturalSize.height);
+    setCorners(nextQuad);
+    setNaturalSize({ width: naturalSize.height, height: naturalSize.width });
     setRotationAngle((prev) => (prev + 90) % 360);
   };
 
@@ -311,6 +381,8 @@ export const CropModal: React.FC<CropModalProps> = ({
     }
   };
 
+  const midpoints = corners ? getQuadMidpoints(corners) : null;
+
   if (!isOpen || !imageSrc) return null;
 
   return (
@@ -326,9 +398,9 @@ export const CropModal: React.FC<CropModalProps> = ({
           </button>
           <div className="min-w-0">
             <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 truncate">
-              Auto-Cut & Enhance <span className="text-[9px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">AI</span>
+              Auto-Cut & Enhance <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">AI</span>
             </h3>
-            <p className="text-[10px] text-slate-400 truncate">Drag corners to adjust boundary</p>
+            <p className="text-[10px] text-slate-400 truncate">Drag corners or edge bars to adjust boundary</p>
           </div>
         </div>
 
@@ -336,7 +408,7 @@ export const CropModal: React.FC<CropModalProps> = ({
         <button
           onClick={handleConfirm}
           disabled={isProcessing}
-          className="flex items-center space-x-1 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0"
+          className="flex items-center space-x-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0"
         >
           {isProcessing ? (
             <span>Processing...</span>
@@ -361,17 +433,7 @@ export const CropModal: React.FC<CropModalProps> = ({
             ref={imageRef}
             src={imageSrc}
             alt="Source scan"
-            onLoad={() => {
-              if (imageRef.current) {
-                const rect = imageRef.current.getBoundingClientRect();
-                setDisplaySize({
-                  width: rect.width,
-                  height: rect.height,
-                  left: rect.left,
-                  top: rect.top,
-                });
-              }
-            }}
+            onLoad={updateBounds}
             style={{ transform: `rotate(${rotationAngle}deg)` }}
             className="max-w-full max-h-[48vh] sm:max-h-[58vh] object-contain rounded-xl shadow-2xl transition-transform duration-200"
           />
@@ -391,7 +453,7 @@ export const CropModal: React.FC<CropModalProps> = ({
                   ${toDisplayX(corners.bottomRight.x)},${toDisplayY(corners.bottomRight.y)}
                   ${toDisplayX(corners.topRight.x)},${toDisplayY(corners.topRight.y)}
                 `}
-                fill="rgba(0, 0, 0, 0.5)"
+                fill="rgba(0, 0, 0, 0.52)"
                 fillRule="evenodd"
               />
 
@@ -411,6 +473,45 @@ export const CropModal: React.FC<CropModalProps> = ({
             </svg>
           )}
 
+          {/* Draggable Edge Midpoint Bars */}
+          {corners && midpoints && displaySize.width > 0 && (
+            <>
+              {(
+                [
+                  { key: 'top' as const, pt: midpoints.top, orientation: 'horizontal' },
+                  { key: 'right' as const, pt: midpoints.right, orientation: 'vertical' },
+                  { key: 'bottom' as const, pt: midpoints.bottom, orientation: 'horizontal' },
+                  { key: 'left' as const, pt: midpoints.left, orientation: 'vertical' },
+                ] as const
+              ).map(({ key, pt, orientation }) => {
+                const dx = toDisplayX(pt.x);
+                const dy = toDisplayY(pt.y);
+                const isDragging = dragTarget?.type === 'edge' && dragTarget.key === key;
+
+                return (
+                  <div
+                    key={`edge_${key}`}
+                    onPointerDown={(e) => handleEdgePointerDown(key, e)}
+                    style={{
+                      left: `${dx}px`,
+                      top: `${dy}px`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                    className={`absolute z-20 flex items-center justify-center cursor-move touch-none ${
+                      orientation === 'horizontal' ? 'w-14 h-8' : 'w-8 h-14'
+                    } ${isDragging ? 'scale-125' : ''}`}
+                  >
+                    <div
+                      className={`rounded-full bg-cyan-500/80 border border-white shadow-md transition-all ${
+                        orientation === 'horizontal' ? 'w-6 h-2' : 'w-2 h-6'
+                      }`}
+                    ></div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
           {/* Draggable Corner Handles */}
           {corners && displaySize.width > 0 && (
             <>
@@ -425,19 +526,19 @@ export const CropModal: React.FC<CropModalProps> = ({
                 const pt = corners[key];
                 const dx = toDisplayX(pt.x);
                 const dy = toDisplayY(pt.y);
-                const isDragging = draggingCorner === key;
+                const isDragging = dragTarget?.type === 'corner' && dragTarget.key === key;
 
                 return (
                   <div
-                    key={key}
-                    onPointerDown={(e) => handlePointerDown(key, e)}
+                    key={`corner_${key}`}
+                    onPointerDown={(e) => handleCornerPointerDown(key, e)}
                     style={{
                       left: `${dx}px`,
                       top: `${dy}px`,
                       transform: 'translate(-50%, -50%)',
                     }}
                     className={`absolute z-30 w-12 h-12 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none ${
-                      isDragging ? 'scale-125' : ''
+                      isDragging ? 'scale-130' : ''
                     }`}
                   >
                     <div className="w-7 h-7 rounded-full bg-blue-600 border-2 border-white shadow-[0_0_15px_#38bdf8] flex items-center justify-center">
@@ -451,16 +552,16 @@ export const CropModal: React.FC<CropModalProps> = ({
         </div>
 
         {/* Magnifying Loupe */}
-        {draggingCorner && dragClientPos && (
+        {dragTarget && dragClientPos && (
           <div
             style={{
               left: `${dragClientPos.x}px`,
-              top: `${dragClientPos.y - 75}px`,
+              top: `${dragClientPos.y - 85}px`,
               transform: 'translate(-50%, -50%)',
             }}
-            className="fixed z-50 pointer-events-none rounded-full overflow-hidden border-3 border-blue-400 shadow-[0_0_20px_rgba(56,189,248,0.6)] bg-black"
+            className="fixed z-50 pointer-events-none rounded-full overflow-hidden border-3 border-blue-400 shadow-[0_0_25px_rgba(56,189,248,0.7)] bg-black"
           >
-            <canvas ref={loupeCanvasRef} className="w-24 h-24 block" />
+            <canvas ref={loupeCanvasRef} className="w-28 h-28 block" />
           </div>
         )}
       </div>
@@ -489,7 +590,7 @@ export const CropModal: React.FC<CropModalProps> = ({
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all cursor-pointer"
           >
             <RotateCw className="w-3.5 h-3.5" />
-            <span>Rotate</span>
+            <span>Rotate 90°</span>
           </button>
 
           <button
@@ -501,7 +602,7 @@ export const CropModal: React.FC<CropModalProps> = ({
             }`}
           >
             <Sun className="w-3.5 h-3.5 text-amber-400" />
-            <span>Light</span>
+            <span>Light AI</span>
           </button>
         </div>
 
@@ -518,7 +619,9 @@ export const CropModal: React.FC<CropModalProps> = ({
                 />
                 <span>Equalize Illumination & Whiten Paper</span>
               </label>
-              <span className="text-[10px] text-emerald-400 font-semibold">AI Enabled</span>
+              <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> AI Active
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-1">

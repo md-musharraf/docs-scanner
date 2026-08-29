@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Scissors, Check } from 'lucide-react';
+import { Scissors, Check, Archive, FileText } from 'lucide-react';
+import JSZip from 'jszip';
 import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
 import { renderAllPdfPages } from '../../lib/pdfRenderer';
 import type { RenderedPage } from '../../core/types';
 import { splitPDF } from '../../lib/pdfEngine';
-import { saveDocumentLocally } from '../../lib/storage';
+import { saveDocumentLocally, downloadFile } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { ensurePdfExtension } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
@@ -25,6 +26,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [rangeInput, setRangeInput] = useState('');
   const [isSplitting, setIsSplitting] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
   const [splitPdfData, setSplitPdfData] = useState<Uint8Array | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
@@ -134,6 +136,29 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       showToast('Error extracting pages', 'error');
     } finally {
       setIsSplitting(false);
+    }
+  };
+
+  const handleExtractZip = async () => {
+    if (!fileBuffer || selectedPages.length === 0) return;
+    setIsZipping(true);
+    try {
+      const zip = new JSZip();
+      const baseName = file?.name.replace(/\.pdf$/i, '') || 'Document';
+
+      for (const pageNum of selectedPages) {
+        const singlePageBytes = await splitPDF(fileBuffer, [pageNum - 1]);
+        zip.file(`${baseName}_page_${pageNum}.pdf`, singlePageBytes);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      await downloadFile(zipBlob, `${baseName}_split_pages.zip`, 'application/zip');
+      showToast('ZIP with individual PDFs downloaded!', 'success');
+    } catch (err) {
+      logger.error('SplitPdfTool', 'ZIP extract error', err);
+      showToast('Error extracting individual PDFs', 'error');
+    } finally {
+      setIsZipping(false);
     }
   };
 
@@ -274,24 +299,44 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
             })}
           </div>
 
-          {/* Extract CTA */}
-          <button
-            onClick={handleExtract}
-            disabled={selectedPages.length === 0 || isSplitting}
-            className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
-          >
-            {isSplitting ? (
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                <span>Extracting Pages...</span>
-              </div>
-            ) : (
-              <>
-                <Scissors className="w-4 h-4" />
-                <span>Extract {selectedPages.length} Selected Pages to New PDF</span>
-              </>
-            )}
-          </button>
+          {/* Extract CTAs */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={handleExtract}
+              disabled={selectedPages.length === 0 || isSplitting || isZipping}
+              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-indigo-600/30 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+            >
+              {isSplitting ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  <span>Creating PDF...</span>
+                </div>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4" />
+                  <span>Extract as Single PDF ({selectedPages.length} Pages)</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleExtractZip}
+              disabled={selectedPages.length === 0 || isSplitting || isZipping}
+              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+            >
+              {isZipping ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  <span>Zipping Files...</span>
+                </div>
+              ) : (
+                <>
+                  <Archive className="w-4 h-4 text-indigo-400" />
+                  <span>Download Each Page as PDF (ZIP)</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 

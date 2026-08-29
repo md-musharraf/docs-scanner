@@ -9,6 +9,7 @@ import {
   Sliders,
   CheckCircle2,
   FileStack,
+  Crop,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import confetti from 'canvas-confetti';
@@ -38,6 +39,22 @@ interface ImageItem {
 
 const TARGET_SIZE_PRESETS = [10, 20, 50, 100, 200, 500];
 
+interface DimensionPreset {
+  id: string;
+  label: string;
+  w: number;
+  h: number;
+  desc: string;
+}
+
+const DIMENSION_PRESETS: DimensionPreset[] = [
+  { id: 'passport', label: 'Passport Photo', w: 350, h: 450, desc: '3.5 × 4.5 cm' },
+  { id: 'signature', label: 'Signature Scan', w: 140, h: 60, desc: 'Govt Form Standard' },
+  { id: 'id_card', label: 'ID / PAN Card', w: 850, h: 540, desc: '8.5 × 5.4 cm' },
+  { id: 'square', label: 'Square Avatar', w: 500, h: 500, desc: '1:1 Square' },
+  { id: 'hd', label: 'Full HD Photo', w: 1920, h: 1080, desc: '1080p Landscape' },
+];
+
 interface ResizeCompressToolProps {
   onDocumentSaved?: () => void;
 }
@@ -45,11 +62,17 @@ interface ResizeCompressToolProps {
 export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocumentSaved }) => {
   const { showToast } = useToast();
   const [images, setImages] = useState<ImageItem[]>([]);
-  const [mode, setMode] = useState<'target' | 'manual'>('target');
+  const [mode, setMode] = useState<'target' | 'dimension' | 'manual'>('target');
 
   // Target KB State
   const [targetKB, setTargetKB] = useState<number>(100);
   const [customTargetInput, setCustomTargetInput] = useState<string>('100');
+
+  // Exact Dimension State
+  const [activeDimPreset, setActiveDimPreset] = useState<string>('passport');
+  const [customWidth, setCustomWidth] = useState<number>(350);
+  const [customHeight, setCustomHeight] = useState<number>(450);
+  const [fitMode, setFitMode] = useState<'cover' | 'contain' | 'stretch'>('cover');
 
   // Manual State
   const [quality, setQuality] = useState<number>(80);
@@ -106,11 +129,25 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
     }
   };
 
+  const handleDimPresetClick = (preset: DimensionPreset) => {
+    setActiveDimPreset(preset.id);
+    setCustomWidth(preset.w);
+    setCustomHeight(preset.h);
+  };
+
   const compressSingleItem = async (item: ImageItem): Promise<ImageItem> => {
     try {
       let result: CompressionResult;
       if (mode === 'target') {
         result = await compressImageToTargetKB(item.file, targetKB, 'image/jpeg');
+      } else if (mode === 'dimension') {
+        result = await resizeAndCompressImage(item.file, {
+          exactWidth: customWidth,
+          exactHeight: customHeight,
+          fitMode,
+          quality: quality / 100,
+          format,
+        });
       } else {
         result = await resizeAndCompressImage(item.file, {
           quality: quality / 100,
@@ -136,7 +173,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
         updated.push(processed);
       }
       setImages(updated);
-      showToast('All images compressed successfully!', 'success');
+      showToast('All images processed successfully!', 'success');
 
       confetti({
         particleCount: 70,
@@ -181,7 +218,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       }
 
       const zipBlob = await zip.generateAsync({ type: 'blob' });
-      await downloadFile(zipBlob, `compressed_images_${targetKB}kb.zip`, 'application/zip');
+      await downloadFile(zipBlob, `compressed_images.zip`, 'application/zip');
       showToast('ZIP archive saved!', 'success');
     } catch (err) {
       logger.error('ResizeCompressTool', 'ZIP download error', err);
@@ -202,7 +239,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
         { pageSize: 'a4', orientation: 'portrait', margin: 15 }
       );
 
-      const docName = ensurePdfExtension(`Compressed_Photos_${targetKB}kb`);
+      const docName = ensurePdfExtension(`Resized_Photos`);
 
       await saveDocumentLocally({
         name: docName,
@@ -213,7 +250,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       });
 
       if (onDocumentSaved) onDocumentSaved();
-      showToast('Saved compressed photos to PDF library!', 'success');
+      showToast('Saved photos to PDF library!', 'success');
     } catch (err) {
       logger.error('ResizeCompressTool', 'PDF export error', err);
       showToast('Failed to create PDF', 'error');
@@ -244,34 +281,47 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
           <div>
             <h2 className="text-xl font-bold text-white">Image Resizer & Target Compressor</h2>
             <p className="text-xs text-slate-400">
-              Reduce photo file sizes down to 200KB, 50KB, or 10KB without losing clarity
+              Reduce photo file sizes (KB) or resize to exact passport, signature & ID dimensions
             </p>
           </div>
         </div>
 
         {/* Mode Switcher */}
-        <div className="grid grid-cols-2 gap-2 mt-4 bg-slate-950/70 p-1.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-3 gap-2 mt-4 bg-slate-950/70 p-1.5 rounded-2xl border border-slate-800">
           <button
             onClick={() => setMode('target')}
-            className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
               mode === 'target'
                 ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Sparkles className="w-4 h-4" />
-            <span>Target Size (KB Mode)</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Target KB</span>
           </button>
+
+          <button
+            onClick={() => setMode('dimension')}
+            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+              mode === 'dimension'
+                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Crop className="w-3.5 h-3.5" />
+            <span>Passport / Exact</span>
+          </button>
+
           <button
             onClick={() => setMode('manual')}
-            className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
               mode === 'manual'
                 ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Sliders className="w-4 h-4" />
-            <span>Manual Scaling & Quality</span>
+            <Sliders className="w-3.5 h-3.5" />
+            <span>Manual Scale</span>
           </button>
         </div>
       </div>
@@ -282,7 +332,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
         accept="image/*"
         multiple={true}
         title="Add Photos to Resize / Compress"
-        subtitle="Select any photos (JPG, PNG, WebP) from device gallery"
+        subtitle="Select photos (JPG, PNG, WebP) from your gallery"
         icon="image"
       />
 
@@ -303,7 +353,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
             </div>
 
             {/* Target Size Controls */}
-            {mode === 'target' ? (
+            {mode === 'target' && (
               <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-slate-300">
@@ -346,12 +396,81 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                     <span className="text-xs font-bold text-slate-300">KB</span>
                   </div>
                   <span className="text-[10px] text-slate-500">
-                    (e.g., 10 for job portals, 100 for ID cards)
+                    (e.g., 10 for job portals, 50 for PAN/passport)
                   </span>
                 </div>
               </div>
-            ) : (
-              /* Manual Resize Controls */
+            )}
+
+            {/* Exact Dimension Controls */}
+            {mode === 'dimension' && (
+              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 mb-2 block">
+                    Choose Dimension Preset (Forms / Documents)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                    {DIMENSION_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleDimPresetClick(p)}
+                        className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
+                          activeDimPreset === p.id && customWidth === p.w && customHeight === p.h
+                            ? 'bg-amber-600/25 border-amber-500 text-white shadow-sm'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-xs font-bold truncate">{p.label}</span>
+                        <span className="text-[10px] text-amber-400 mt-1">{p.w}×{p.h} px</span>
+                        <span className="text-[9px] text-slate-500">{p.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="space-y-1">
+                    <span className="text-xs text-slate-400">Width (Pixels):</span>
+                    <input
+                      type="number"
+                      min="20"
+                      max="4000"
+                      value={customWidth}
+                      onChange={(e) => setCustomWidth(parseInt(e.target.value, 10) || 100)}
+                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-xs text-slate-400">Height (Pixels):</span>
+                    <input
+                      type="number"
+                      min="20"
+                      max="4000"
+                      value={customHeight}
+                      onChange={(e) => setCustomHeight(parseInt(e.target.value, 10) || 100)}
+                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-xs text-slate-400">Fit Strategy:</span>
+                    <select
+                      value={fitMode}
+                      onChange={(e) => setFitMode(e.target.value as any)}
+                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs p-2 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="cover">Crop / Fill (No Distortion)</option>
+                      <option value="contain">Fit with White Margins</option>
+                      <option value="stretch">Stretch to Fit Exact</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Manual Resize Controls */}
+            {mode === 'manual' && (
               <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs text-slate-400">
@@ -391,7 +510,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                     onChange={(e) => setFormat(e.target.value as any)}
                     className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
-                    <option value="image/jpeg">JPG (Best for photos)</option>
+                    <option value="image/jpeg">JPG (Standard photo)</option>
                     <option value="image/webp">WebP (Modern & Smallest)</option>
                     <option value="image/png">PNG (Lossless)</option>
                   </select>
@@ -408,13 +527,19 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
               {isProcessingAll ? (
                 <div className="flex items-center space-x-2">
                   <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Compressing {images.length} Images...</span>
+                  <span>Processing {images.length} Images...</span>
                 </div>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
                   <span>
-                    {hasAnyResults ? 'Re-Compress All' : `Compress All to ≤ ${targetKB} KB`}
+                    {hasAnyResults
+                      ? 'Re-Process All'
+                      : mode === 'target'
+                      ? `Compress All to ≤ ${targetKB} KB`
+                      : mode === 'dimension'
+                      ? `Resize All to ${customWidth}×${customHeight} px`
+                      : `Apply Custom Scale & Quality`}
                   </span>
                 </>
               )}
@@ -509,7 +634,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                         </span>
                       </div>
                     ) : (
-                      <span className="text-[10px] text-slate-500 italic">Not compressed yet</span>
+                      <span className="text-[10px] text-slate-500 italic">Not processed yet</span>
                     )}
                   </div>
                 </div>

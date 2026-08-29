@@ -6,18 +6,18 @@ export type { ScannerFilter, ImageEnhanceOptions };
 
 /**
  * Fast Local Illumination Normalization & Shadow Removal
- * Uses an optimized Int32Array integral image to divide out uneven lighting and shadows.
+ * Uses an optimized 2D integral image to divide out uneven lighting and paper shadows.
  */
 function normalizeIlluminationAndShadows(
   data: Uint8ClampedArray,
   width: number,
   height: number
 ) {
-  const totalPixels = (width + 1) * (height + 1);
+  const wPlus1 = width + 1;
+  const totalPixels = wPlus1 * (height + 1);
   const integral = new Int32Array(totalPixels);
 
-  // Build integral image
-  const wPlus1 = width + 1;
+  // 1. Build integral image of grayscale values
   for (let y = 0; y < height; y++) {
     let rowSum = 0;
     const yOffset = y * width;
@@ -26,15 +26,15 @@ function normalizeIlluminationAndShadows(
 
     for (let x = 0; x < width; x++) {
       const idx = (yOffset + x) * 4;
-      // Fast luminance approximation: (R*2 + G*5 + B) >> 3
-      const g = (data[idx] * 2 + data[idx + 1] * 5 + data[idx + 2]) >> 3;
+      // Perceptual luminance: (R*77 + G*150 + B*29) >> 8
+      const g = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
       rowSum += g;
       integral[intYOffset + (x + 1)] = integral[prevIntYOffset + (x + 1)] + rowSum;
     }
   }
 
-  // Radius for local background estimation (adaptive to resolution)
-  const radius = Math.max(16, Math.min(64, Math.round(width * 0.04)));
+  // Radius for local background estimation (proportional to image size)
+  const radius = Math.max(16, Math.min(80, Math.round(width * 0.05)));
 
   for (let y = 0; y < height; y++) {
     const y0 = Math.max(0, y - radius);
@@ -54,9 +54,9 @@ function normalizeIlluminationAndShadows(
         integral[y1Offset + x0] +
         integral[y0Offset + x0];
 
-      const localBg = Math.max(30, (sum / count) | 0);
+      const localBg = Math.max(25, (sum / count) | 0);
       const idx = (yOffset + x) * 4;
-      const gain = 246 / localBg;
+      const gain = 250 / localBg;
 
       data[idx] = Math.min(255, (data[idx] * gain) | 0);
       data[idx + 1] = Math.min(255, (data[idx + 1] * gain) | 0);
@@ -66,58 +66,77 @@ function normalizeIlluminationAndShadows(
 }
 
 /**
- * Adaptive Binarization with Local Contrast Recovery for Magic B&W Mode
+ * High-Accuracy Sauvola Adaptive Binarization for Magic B&W Mode
+ * Computes local mean and standard deviation to generate razor-sharp text on pure white paper
+ * without blotches or lost characters.
  */
-function applyAdaptiveMagicBW(
+function applySauvolaMagicBW(
   data: Uint8ClampedArray,
   width: number,
   height: number
 ) {
   const wPlus1 = width + 1;
-  const integral = new Int32Array(wPlus1 * (height + 1));
+  const total = wPlus1 * (height + 1);
+  const integral = new Float64Array(total);
+  const integralSq = new Float64Array(total);
 
+  // 1. Build integral and integral-squared arrays
   for (let y = 0; y < height; y++) {
     let rowSum = 0;
+    let rowSumSq = 0;
     const yOffset = y * width;
-    const intYOffset = (y + 1) * wPlus1;
-    const prevIntYOffset = y * wPlus1;
+    const intY = (y + 1) * wPlus1;
+    const prevIntY = y * wPlus1;
 
     for (let x = 0; x < width; x++) {
       const idx = (yOffset + x) * 4;
-      const g = (data[idx] * 2 + data[idx + 1] * 5 + data[idx + 2]) >> 3;
+      const g = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
       rowSum += g;
-      integral[intYOffset + (x + 1)] = integral[prevIntYOffset + (x + 1)] + rowSum;
+      rowSumSq += g * g;
+
+      integral[intY + (x + 1)] = integral[prevIntY + (x + 1)] + rowSum;
+      integralSq[intY + (x + 1)] = integralSq[prevIntY + (x + 1)] + rowSumSq;
     }
   }
 
-  const radius = Math.max(10, Math.min(48, Math.round(width * 0.03)));
+  const radius = Math.max(12, Math.min(50, Math.round(width * 0.035)));
+  const k = 0.22;
+  const R = 128;
 
   for (let y = 0; y < height; y++) {
     const y0 = Math.max(0, y - radius);
     const y1 = Math.min(height, y + radius + 1);
-    const y1Offset = y1 * wPlus1;
-    const y0Offset = y0 * wPlus1;
+    const y1Off = y1 * wPlus1;
+    const y0Off = y0 * wPlus1;
     const yOffset = y * width;
 
     for (let x = 0; x < width; x++) {
       const x0 = Math.max(0, x - radius);
       const x1 = Math.min(width, x + radius + 1);
-
       const count = (x1 - x0) * (y1 - y0);
-      const sum =
-        integral[y1Offset + x1] -
-        integral[y0Offset + x1] -
-        integral[y1Offset + x0] +
-        integral[y0Offset + x0];
 
-      const localMean = (sum / count) | 0;
+      const sum = integral[y1Off + x1] - integral[y0Off + x1] - integral[y1Off + x0] + integral[y0Off + x0];
+      const sumSq = integralSq[y1Off + x1] - integralSq[y0Off + x1] - integralSq[y1Off + x0] + integralSq[y0Off + x0];
+
+      const mean = sum / count;
+      const variance = Math.max(0, sumSq / count - mean * mean);
+      const stdDev = Math.sqrt(variance);
+
+      // Sauvola formula: T = mean * (1 + k * (stdDev / R - 1))
+      const threshold = Math.max(35, Math.min(235, mean * (1 + k * (stdDev / R - 1))));
+
       const idx = (yOffset + x) * 4;
-      const currentGray = (data[idx] * 2 + data[idx + 1] * 5 + data[idx + 2]) >> 3;
-      const threshold = (localMean * 0.88) | 0;
+      const currentGray = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
 
       let val = 255;
       if (currentGray < threshold) {
-        val = Math.max(0, Math.min(40, ((currentGray / threshold) * 35) | 0));
+        // Smooth anti-aliased dark ink transition
+        const diff = threshold - currentGray;
+        if (diff > 25) {
+          val = 0;
+        } else {
+          val = Math.max(0, Math.min(45, (25 - diff) * 2));
+        }
       }
 
       data[idx] = val;
@@ -175,6 +194,10 @@ export async function applyImageFilter(
     throw new Error('Canvas 2D context not available');
   }
 
+  // Fill solid white background first to safeguard against transparent PNG artifacts
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+
   // Draw scaled image
   ctx.drawImage(imageSource, 0, 0, targetWidth, targetHeight);
 
@@ -201,8 +224,9 @@ export async function applyImageFilter(
 
   // 3. Document Filter Presets
   if (opts.filter === 'bw_document') {
-    applyAdaptiveMagicBW(data, targetWidth, targetHeight);
+    applySauvolaMagicBW(data, targetWidth, targetHeight);
   } else if (opts.filter === 'magic_color') {
+    // Magic Color: whiten paper while enriching color ink/stamps
     for (let i = 0; i < data.length; i += 4) {
       let r = data[i];
       let g = data[i + 1];
@@ -210,32 +234,47 @@ export async function applyImageFilter(
 
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-      if (lum > 175) {
-        const factor = (lum - 175) / 80;
+      // Color saturation measure: max - min difference
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const chroma = maxC - minC;
+
+      if (lum > 165 && chroma < 28) {
+        // Whitish paper background -> boost to pure clean paper white
+        const factor = (lum - 165) / 90;
         r = Math.min(255, r + (255 - r) * factor);
         g = Math.min(255, g + (255 - g) * factor);
         b = Math.min(255, b + (255 - b) * factor);
+      } else if (chroma >= 28) {
+        // Colored ink / stamps (blue pen, red stamp, green signature) -> boost vibrancy
+        const avg = (r + g + b) / 3;
+        r = Math.min(255, Math.max(0, avg + (r - avg) * 1.35));
+        g = Math.min(255, Math.max(0, avg + (g - avg) * 1.35));
+        b = Math.min(255, Math.max(0, avg + (b - avg) * 1.35));
       } else {
-        r = Math.max(0, r * 0.84);
-        g = Math.max(0, g * 0.84);
-        b = Math.max(0, b * 0.84);
+        // Dark text -> deepen contrast
+        r = Math.max(0, r * 0.82);
+        g = Math.max(0, g * 0.82);
+        b = Math.max(0, b * 0.82);
       }
 
-      data[i] = r;
-      data[i + 1] = g;
-      data[i + 2] = b;
+      data[i] = r | 0;
+      data[i + 1] = g | 0;
+      data[i + 2] = b | 0;
     }
   } else if (opts.filter === 'grayscale') {
     for (let i = 0; i < data.length; i += 4) {
-      const gray = (data[i] * 2 + data[i + 1] * 5 + data[i + 2]) >> 3;
-      data[i] = gray;
-      data[i + 1] = gray;
-      data[i + 2] = gray;
+      const gray = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      // Linear stretch
+      const stretched = Math.min(255, Math.max(0, (gray - 20) * 1.18)) | 0;
+      data[i] = stretched;
+      data[i + 1] = stretched;
+      data[i + 2] = stretched;
     }
   } else if (opts.filter === 'sharp') {
     for (let i = 0; i < data.length; i += 4) {
-      const lum = (data[i] * 2 + data[i + 1] * 5 + data[i + 2]) >> 3;
-      const factor = lum < 130 ? 0.78 : 1.22;
+      const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      const factor = lum < 128 ? 0.76 : 1.24;
 
       data[i] = Math.min(255, (data[i] * factor) | 0);
       data[i + 1] = Math.min(255, (data[i + 1] * factor) | 0);
