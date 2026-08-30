@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, Stamp, RotateCw, Trash2, Sparkles } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
 import { addWatermarkToPDF, rotatePDFPages, removePagesFromPDF } from '../../lib/pdfEngine';
 import { getPdfPageCount } from '../../lib/pdfRenderer';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
-import { ensurePdfExtension } from '../../utils/formatters';
+import { ensurePdfExtension, triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -109,11 +110,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
       setResultPdf(outputBytes);
       setIsPreviewOpen(true);
       showToast('Modified PDF saved successfully!', 'success');
-
-      confetti({
-        particleCount: 70,
-        spread: 55,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('PdfTools', 'Error applying tool', err);
       showToast('Error modifying PDF. Please ensure the file is valid.', 'error');
@@ -124,56 +121,64 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-purple-600/20 text-purple-400 border border-purple-500/30">
-            <SlidersHorizontal className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">PDF Power Tools</h2>
-            <p className="text-xs text-slate-400">Stamp watermarks, rotate pages, and delete unwanted sheets offline</p>
-          </div>
-        </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={SlidersHorizontal}
+        title="PDF Power Tools"
+        subtitle="Stamp watermarks, rotate pages, and delete unwanted sheets offline"
+        badge="Multi-Tool"
+        badgeVariant="purple"
+      />
 
-        {/* SubTool Switcher Tabs */}
-        <div className="grid grid-cols-3 gap-2 mt-4">
-          <button
-            onClick={() => setActiveSubTool('watermark')}
-            className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer ${
-              activeSubTool === 'watermark'
-                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm'
-                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Stamp className="w-4 h-4 text-purple-400" />
-            <span>Watermark</span>
-          </button>
+      {/* SubTool Switcher Tabs */}
+      <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 shadow-md">
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setActiveSubTool('watermark');
+          }}
+          className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer min-h-[40px] ${
+            activeSubTool === 'watermark'
+              ? 'bg-purple-600/25 border-purple-500 text-white shadow-sm font-bold'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <Stamp className="w-4 h-4 text-purple-400" />
+          <span>Watermark</span>
+        </button>
 
-          <button
-            onClick={() => setActiveSubTool('rotate')}
-            className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer ${
-              activeSubTool === 'rotate'
-                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm'
-                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-            }`}
-          >
-            <RotateCw className="w-4 h-4 text-purple-400" />
-            <span>Rotate</span>
-          </button>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setActiveSubTool('rotate');
+          }}
+          className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer min-h-[40px] ${
+            activeSubTool === 'rotate'
+              ? 'bg-purple-600/25 border-purple-500 text-white shadow-sm font-bold'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <RotateCw className="w-4 h-4 text-purple-400" />
+          <span>Rotate</span>
+        </button>
 
-          <button
-            onClick={() => setActiveSubTool('remove')}
-            className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer ${
-              activeSubTool === 'remove'
-                ? 'bg-purple-600/20 border-purple-500 text-white shadow-sm'
-                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Trash2 className="w-4 h-4 text-purple-400" />
-            <span>Delete Pages</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setActiveSubTool('remove');
+          }}
+          className={`flex items-center justify-center space-x-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-semibold border transition-all cursor-pointer min-h-[40px] ${
+            activeSubTool === 'remove'
+              ? 'bg-purple-600/25 border-purple-500 text-white shadow-sm font-bold'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          <Trash2 className="w-4 h-4 text-purple-400" />
+          <span>Delete Pages</span>
+        </button>
       </div>
 
       {!file && (
@@ -188,20 +193,22 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
       )}
 
       {file && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-5 shadow-xl">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
-              <h3 className="text-sm font-semibold text-white truncate max-w-sm">
+              <h3 className="text-sm font-bold text-white truncate max-w-sm">
                 {file.name}
               </h3>
               <p className="text-xs text-slate-400">Total {pageCount} pages</p>
             </div>
             <button
+              type="button"
               onClick={() => {
+                triggerHaptic(20);
                 setFile(null);
                 setBuffer(null);
               }}
-              className="text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded-xl bg-slate-800 cursor-pointer"
+              className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 cursor-pointer transition-colors min-h-[36px]"
             >
               Change PDF
             </button>
@@ -225,7 +232,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Opacity</span>
-                    <span>{Math.round(watermarkOpacity * 100)}%</span>
+                    <span className="font-bold text-purple-400">{Math.round(watermarkOpacity * 100)}%</span>
                   </div>
                   <input
                     type="range"
@@ -241,7 +248,7 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Font Size</span>
-                    <span>{watermarkSize}px</span>
+                    <span className="font-bold text-purple-400">{watermarkSize}px</span>
                   </div>
                   <input
                     type="range"
@@ -264,10 +271,14 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
                 {[90, 180, 270].map((deg) => (
                   <button
                     key={deg}
-                    onClick={() => setRotateAngle(deg)}
-                    className={`py-3 rounded-xl text-sm font-semibold border transition-all cursor-pointer ${
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(20);
+                      setRotateAngle(deg);
+                    }}
+                    className={`py-3 rounded-xl text-sm font-semibold border transition-all cursor-pointer min-h-[44px] ${
                       rotateAngle === deg
-                        ? 'bg-purple-600/20 border-purple-500 text-white'
+                        ? 'bg-purple-600/25 border-purple-500 text-white font-bold shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -297,23 +308,17 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
           )}
 
           {/* Action Button */}
-          <button
+          <ActionButton
             onClick={handleApplyTool}
-            disabled={isProcessing}
-            className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-purple-600/30 disabled:opacity-50 active:scale-[0.99] transition-all cursor-pointer"
+            isLoading={isProcessing}
+            loadingText="Applying Changes..."
+            icon={Sparkles}
+            variant="purple"
+            size="lg"
+            fullWidth
           >
-            {isProcessing ? (
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                <span>Applying Changes...</span>
-              </div>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>Save Modified PDF</span>
-              </>
-            )}
-          </button>
+            Save Modified PDF
+          </ActionButton>
         </div>
       )}
 
@@ -327,3 +332,4 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
     </div>
   );
 };
+

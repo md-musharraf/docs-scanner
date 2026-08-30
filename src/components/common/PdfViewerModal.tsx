@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { X, Download, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
 import { renderPdfPage, getPdfPageCount } from '../../lib/pdfRenderer';
 import { downloadFile, shareDocument } from '../../lib/storage';
+import { triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -25,7 +26,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   const [pageImage, setPageImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const renderPage = async (data: Uint8Array, page: number, currentScale: number) => {
+  const renderPage = useCallback(async (data: Uint8Array, page: number, currentScale: number) => {
     setIsLoading(true);
     try {
       const rendered = await renderPdfPage(data, page, currentScale);
@@ -36,7 +37,25 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [showToast]);
+
+  const handlePrevPage = useCallback(() => {
+    if (currentPage > 1 && pdfData) {
+      triggerHaptic(20);
+      const newPage = currentPage - 1;
+      setCurrentPage(newPage);
+      renderPage(pdfData, newPage, scale);
+    }
+  }, [currentPage, pdfData, renderPage, scale]);
+
+  const handleNextPage = useCallback(() => {
+    if (currentPage < totalPages && pdfData) {
+      triggerHaptic(20);
+      const newPage = currentPage + 1;
+      setCurrentPage(newPage);
+      renderPage(pdfData, newPage, scale);
+    }
+  }, [currentPage, totalPages, pdfData, renderPage, scale]);
 
   useEffect(() => {
     if (!isOpen || !pdfData) {
@@ -67,24 +86,24 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     };
   }, [isOpen, pdfData, showToast]);
 
-  const handlePrevPage = () => {
-    if (currentPage > 1 && pdfData) {
-      const newPage = currentPage - 1;
-      setCurrentPage(newPage);
-      renderPage(pdfData, newPage, scale);
-    }
-  };
+  useEffect(() => {
+    if (!isOpen) return;
 
-  const handleNextPage = () => {
-    if (currentPage < totalPages && pdfData) {
-      const newPage = currentPage + 1;
-      setCurrentPage(newPage);
-      renderPage(pdfData, newPage, scale);
-    }
-  };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft') handlePrevPage();
+      if (e.key === 'ArrowRight') handleNextPage();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose, handlePrevPage, handleNextPage]);
 
   const handleZoomIn = () => {
     if (pdfData) {
+      triggerHaptic(20);
       const newScale = Math.min(scale + 0.3, 3.0);
       setScale(newScale);
       renderPage(pdfData, currentPage, newScale);
@@ -93,6 +112,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
   const handleZoomOut = () => {
     if (pdfData) {
+      triggerHaptic(20);
       const newScale = Math.max(scale - 0.3, 0.6);
       setScale(newScale);
       renderPage(pdfData, currentPage, newScale);
@@ -101,6 +121,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
   const handleDownload = async () => {
     if (pdfData) {
+      triggerHaptic(25);
       await downloadFile(pdfData, filename);
       showToast(`Saved ${filename}`, 'success');
     }
@@ -108,6 +129,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
   const handleShare = async () => {
     if (!pdfData) return;
+    triggerHaptic(25);
     const shared = await shareDocument(pdfData, filename);
     if (shared) {
       showToast('Document shared', 'success');
@@ -122,13 +144,17 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/80 pt-[max(env(safe-area-inset-top),12px)]">
         <div className="flex items-center space-x-3 truncate">
           <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            type="button"
+            onClick={() => {
+              triggerHaptic(20);
+              onClose();
+            }}
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
           <div className="truncate">
-            <h3 className="text-sm font-semibold text-white truncate max-w-[180px] sm:max-w-md">
+            <h3 className="text-sm font-bold text-white truncate max-w-[180px] sm:max-w-md">
               {filename}
             </h3>
             <p className="text-xs text-slate-400">
@@ -142,8 +168,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
           {/* Zoom controls */}
           <div className="hidden sm:flex items-center space-x-1 bg-slate-800/80 rounded-xl p-1 border border-slate-700">
             <button
+              type="button"
               onClick={handleZoomOut}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
               title="Zoom Out"
             >
               <ZoomOut className="w-4 h-4" />
@@ -152,8 +179,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
               {Math.round(scale * 100)}%
             </span>
             <button
+              type="button"
               onClick={handleZoomIn}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
               title="Zoom In"
             >
               <ZoomIn className="w-4 h-4" />
@@ -162,8 +190,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
           {/* Share on mobile */}
           <button
+            type="button"
             onClick={handleShare}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
             title="Share PDF"
           >
             <Share2 className="w-4 h-4" />
@@ -171,8 +200,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
           {/* Download button */}
           <button
+            type="button"
             onClick={handleDownload}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer"
+            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer min-h-[40px]"
           >
             <Download className="w-4 h-4" />
             <span className="hidden xs:inline">Save</span>
@@ -202,22 +232,24 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       {totalPages > 1 && (
         <div className="p-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-center space-x-4 pb-[max(env(safe-area-inset-bottom),12px)]">
           <button
+            type="button"
             onClick={handlePrevPage}
             disabled={currentPage <= 1}
-            className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-medium transition-colors cursor-pointer"
+            className="flex items-center space-x-1 px-4 py-2 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-semibold transition-colors cursor-pointer min-h-[40px]"
           >
             <ChevronLeft className="w-4 h-4" />
             <span>Prev</span>
           </button>
 
-          <span className="text-sm font-semibold text-slate-300">
+          <span className="text-sm font-bold text-slate-300">
             {currentPage} / {totalPages}
           </span>
 
           <button
+            type="button"
             onClick={handleNextPage}
             disabled={currentPage >= totalPages}
-            className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-medium transition-colors cursor-pointer"
+            className="flex items-center space-x-1 px-4 py-2 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-semibold transition-colors cursor-pointer min-h-[40px]"
           >
             <span>Next</span>
             <ChevronRight className="w-4 h-4" />
@@ -227,3 +259,4 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     </div>
   );
 };
+

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { UploadCloud, FilePlus, Image as ImageIcon } from 'lucide-react';
+import { triggerHaptic } from '../../utils/formatters';
 
 interface FileDropzoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -33,6 +34,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+    triggerHaptic(20);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const filesArray = Array.from(e.dataTransfer.files);
       onFilesSelected(filesArray);
@@ -41,6 +43,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
+      triggerHaptic(20);
       const filesArray = Array.from(e.target.files);
       onFilesSelected(filesArray);
       e.target.value = '';
@@ -49,14 +52,25 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          fileInputRef.current?.click();
+        }
+      }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={() => fileInputRef.current?.click()}
-      className={`relative group cursor-pointer border-2 border-dashed rounded-3xl p-6 sm:p-10 text-center transition-all duration-200 select-none ${
+      onClick={() => {
+        triggerHaptic(15);
+        fileInputRef.current?.click();
+      }}
+      className={`relative group cursor-pointer border-2 border-dashed rounded-3xl p-6 sm:p-10 text-center transition-all duration-200 select-none shadow-lg ${
         isDragging
           ? 'border-blue-500 bg-blue-500/10 scale-[1.01]'
-          : 'border-slate-800 hover:border-slate-700 bg-slate-900/40 hover:bg-slate-900/70'
+          : 'border-slate-800 hover:border-blue-500/50 bg-slate-900/50 hover:bg-slate-900/80 backdrop-blur-md'
       }`}
     >
       <input
@@ -78,7 +92,7 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
         </div>
 
         <div className="space-y-1 max-w-sm mx-auto">
-          <h3 className="text-sm sm:text-base font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">
+          <h3 className="text-sm sm:text-base font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
             {title}
           </h3>
           <p className="text-xs text-slate-400 font-medium">
@@ -86,11 +100,12 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
           </p>
         </div>
 
-        <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/25 transition-all">
-          <FilePlus className="w-3.5 h-3.5" />
+        <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition-all">
+          <FilePlus className="w-4 h-4" />
           <span>{multiple ? 'Choose Files' : 'Select File'}</span>
         </div>
       </div>
     </div>
   );
 };
+

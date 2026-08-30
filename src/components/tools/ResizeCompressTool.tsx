@@ -12,8 +12,9 @@ import {
   Crop,
 } from 'lucide-react';
 import JSZip from 'jszip';
-import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
 import {
   compressImageToTargetKB,
   resizeAndCompressImage,
@@ -21,7 +22,7 @@ import {
 import type { CompressionResult } from '../../services/imageCompressor';
 import { downloadFile, saveDocumentLocally } from '../../lib/storage';
 import { imagesToPDF } from '../../lib/pdfEngine';
-import { formatFileSize, ensurePdfExtension } from '../../utils/formatters';
+import { formatFileSize, ensurePdfExtension, triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -117,6 +118,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   };
 
   const handleTargetPresetClick = (kb: number) => {
+    triggerHaptic(20);
     setTargetKB(kb);
     setCustomTargetInput(kb.toString());
   };
@@ -130,6 +132,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   };
 
   const handleDimPresetClick = (preset: DimensionPreset) => {
+    triggerHaptic(20);
     setActiveDimPreset(preset.id);
     setCustomWidth(preset.w);
     setCustomHeight(preset.h);
@@ -174,11 +177,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       }
       setImages(updated);
       showToast('All images processed successfully!', 'success');
-
-      confetti({
-        particleCount: 70,
-        spread: 60,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('ResizeCompressTool', 'Batch compression error', err);
       showToast('Compression failed', 'error');
@@ -189,6 +188,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
 
   const handleDownloadSingle = async (item: ImageItem) => {
     if (!item.result) return;
+    triggerHaptic(25);
     const baseName = item.name.replace(/\.[^/.]+$/, '');
     const ext = item.result.format === 'image/png' ? 'png' : item.result.format === 'image/webp' ? 'webp' : 'jpg';
     const filename = `${baseName}_resized_${Math.round(item.result.sizeBytes / 1024)}kb.${ext}`;
@@ -220,6 +220,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       await downloadFile(zipBlob, `compressed_images.zip`, 'application/zip');
       showToast('ZIP archive saved!', 'success');
+      triggerCelebration();
     } catch (err) {
       logger.error('ResizeCompressTool', 'ZIP download error', err);
       showToast('Failed to create ZIP', 'error');
@@ -251,6 +252,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
 
       if (onDocumentSaved) onDocumentSaved();
       showToast('Saved photos to PDF library!', 'success');
+      triggerCelebration();
     } catch (err) {
       logger.error('ResizeCompressTool', 'PDF export error', err);
       showToast('Failed to create PDF', 'error');
@@ -260,7 +262,22 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   };
 
   const removeImage = (id: string) => {
-    setImages((prev) => prev.filter((img) => img.id !== id));
+    triggerHaptic(20);
+    setImages((prev) => {
+      const target = prev.find((img) => img.id === id);
+      if (target && target.originalUrl) {
+        URL.revokeObjectURL(target.originalUrl);
+      }
+      return prev.filter((img) => img.id !== id);
+    });
+  };
+
+  const clearAllImages = () => {
+    triggerHaptic(20);
+    images.forEach((img) => {
+      if (img.originalUrl) URL.revokeObjectURL(img.originalUrl);
+    });
+    setImages([]);
   };
 
   const totalOriginalBytes = images.reduce((acc, curr) => acc + curr.originalSize, 0);
@@ -272,58 +289,64 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-amber-600/20 text-amber-400 border border-amber-500/30">
-            <Minimize2 className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">Image Resizer & Target Compressor</h2>
-            <p className="text-xs text-slate-400">
-              Reduce photo file sizes (KB) or resize to exact passport, signature & ID dimensions
-            </p>
-          </div>
-        </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={Minimize2}
+        title="Image Resizer & Target Compressor"
+        subtitle="Reduce photo file sizes (KB) or resize to exact passport, signature & ID dimensions"
+        badge="Batch Engine"
+        badgeVariant="amber"
+      />
 
-        {/* Mode Switcher */}
-        <div className="grid grid-cols-3 gap-2 mt-4 bg-slate-950/70 p-1.5 rounded-2xl border border-slate-800">
-          <button
-            onClick={() => setMode('target')}
-            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-              mode === 'target'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Target KB</span>
-          </button>
+      {/* Mode Switcher */}
+      <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 shadow-md">
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setMode('target');
+          }}
+          className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer min-h-[40px] ${
+            mode === 'target'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Target KB</span>
+        </button>
 
-          <button
-            onClick={() => setMode('dimension')}
-            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-              mode === 'dimension'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Crop className="w-3.5 h-3.5" />
-            <span>Passport / Exact</span>
-          </button>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setMode('dimension');
+          }}
+          className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer min-h-[40px] ${
+            mode === 'dimension'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Crop className="w-3.5 h-3.5" />
+          <span>Passport / Exact</span>
+        </button>
 
-          <button
-            onClick={() => setMode('manual')}
-            className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-              mode === 'manual'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Sliders className="w-3.5 h-3.5" />
-            <span>Manual Scale</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setMode('manual');
+          }}
+          className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer min-h-[40px] ${
+            mode === 'manual'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Sliders className="w-3.5 h-3.5" />
+          <span>Manual Scale</span>
+        </button>
       </div>
 
       {/* Dropzone */}
@@ -337,7 +360,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       />
 
       {images.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-5 shadow-xl">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
           {/* Controls Bar */}
           <div className="space-y-4 border-b border-slate-800 pb-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -345,8 +368,9 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 Compression Settings ({images.length} photos)
               </h3>
               <button
-                onClick={() => setImages([])}
-                className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded-lg hover:bg-red-500/10 cursor-pointer"
+                type="button"
+                onClick={clearAllImages}
+                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
               >
                 Clear All
               </button>
@@ -369,8 +393,9 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                   {TARGET_SIZE_PRESETS.map((kb) => (
                     <button
                       key={kb}
+                      type="button"
                       onClick={() => handleTargetPresetClick(kb)}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[36px] ${
                         targetKB === kb
                           ? 'bg-amber-600/30 border-amber-500 text-amber-300 shadow-sm'
                           : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
@@ -391,12 +416,12 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                       max="10000"
                       value={customTargetInput}
                       onChange={(e) => handleCustomTargetChange(e.target.value)}
-                      className="w-20 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-xl focus:outline-none focus:border-amber-500"
+                      className="w-20 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-xl focus:outline-none focus:border-amber-500 min-h-[34px]"
                     />
                     <span className="text-xs font-bold text-slate-300">KB</span>
                   </div>
                   <span className="text-[10px] text-slate-500">
-                    (e.g., 10 for job portals, 50 for PAN/passport)
+                    (e.g., 20 for govt forms, 50 for PAN/passport)
                   </span>
                 </div>
               </div>
@@ -413,8 +438,9 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                     {DIMENSION_PRESETS.map((p) => (
                       <button
                         key={p.id}
+                        type="button"
                         onClick={() => handleDimPresetClick(p)}
-                        className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
+                        className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between min-h-[72px] ${
                           activeDimPreset === p.id && customWidth === p.w && customHeight === p.h
                             ? 'bg-amber-600/25 border-amber-500 text-white shadow-sm'
                             : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
@@ -519,36 +545,28 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
             )}
 
             {/* Action Compress Button */}
-            <button
+            <ActionButton
               onClick={handleCompressAll}
-              disabled={isProcessingAll}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-amber-600/30 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              isLoading={isProcessingAll}
+              loadingText={`Processing ${images.length} Images...`}
+              icon={Sparkles}
+              variant="amber"
+              size="lg"
+              fullWidth
             >
-              {isProcessingAll ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Processing {images.length} Images...</span>
-                </div>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>
-                    {hasAnyResults
-                      ? 'Re-Process All'
-                      : mode === 'target'
-                      ? `Compress All to ≤ ${targetKB} KB`
-                      : mode === 'dimension'
-                      ? `Resize All to ${customWidth}×${customHeight} px`
-                      : `Apply Custom Scale & Quality`}
-                  </span>
-                </>
-              )}
-            </button>
+              {hasAnyResults
+                ? 'Re-Process All Images'
+                : mode === 'target'
+                ? `Compress All to ≤ ${targetKB} KB`
+                : mode === 'dimension'
+                ? `Resize All to ${customWidth}×${customHeight} px`
+                : `Apply Custom Scale & Quality`}
+            </ActionButton>
           </div>
 
           {/* Stats Bar */}
           {hasAnyResults && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-3.5 rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl">
               <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                 <span className="break-all">
@@ -563,23 +581,29 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
 
               {/* Batch Export Options */}
               <div className="flex items-center space-x-2 w-full sm:w-auto">
-                <button
+                <ActionButton
                   onClick={handleDownloadZip}
-                  disabled={isZipping}
-                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                  isLoading={isZipping}
+                  loadingText="Zipping..."
+                  icon={Archive}
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 sm:flex-initial"
                 >
-                  <Archive className="w-3.5 h-3.5" />
-                  <span>{isZipping ? 'Zipping...' : 'Download ZIP'}</span>
-                </button>
+                  Download ZIP
+                </ActionButton>
 
-                <button
+                <ActionButton
                   onClick={handleSaveToPdf}
-                  disabled={isPdfExporting}
-                  className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-600/30"
+                  isLoading={isPdfExporting}
+                  loadingText="Saving..."
+                  icon={FileStack}
+                  variant="primary"
+                  size="sm"
+                  className="flex-1 sm:flex-initial"
                 >
-                  <FileStack className="w-3.5 h-3.5" />
-                  <span>{isPdfExporting ? 'Saving...' : 'Save as PDF'}</span>
-                </button>
+                  Save as PDF
+                </ActionButton>
               </div>
             </div>
           )}
@@ -594,7 +618,10 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 <div className="flex items-start space-x-3">
                   {/* Thumbnail */}
                   <div
-                    onClick={() => setPreviewItem(item)}
+                    onClick={() => {
+                      triggerHaptic(20);
+                      setPreviewItem(item);
+                    }}
                     className="w-16 h-20 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex-shrink-0 cursor-pointer relative group"
                   >
                     <img
@@ -642,8 +669,12 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 {/* Actions */}
                 <div className="flex items-center justify-between border-t border-slate-900 pt-2">
                   <button
-                    onClick={() => setPreviewItem(item)}
-                    className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer"
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic(20);
+                      setPreviewItem(item);
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer min-h-[32px]"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>Preview</span>
@@ -652,8 +683,9 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                   <div className="flex items-center space-x-1">
                     {item.result && (
                       <button
+                        type="button"
                         onClick={() => handleDownloadSingle(item)}
-                        className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors cursor-pointer"
+                        className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors cursor-pointer min-h-[32px]"
                       >
                         <Download className="w-3 h-3" />
                         <span>Save</span>
@@ -661,8 +693,9 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                     )}
 
                     <button
+                      type="button"
                       onClick={() => removeImage(item.id)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 cursor-pointer min-w-[32px] min-h-[32px] flex items-center justify-center"
                       title="Remove image"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -683,13 +716,14 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3"
+            className="relative max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3 shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <h4 className="text-sm font-bold text-white truncate">{previewItem.name}</h4>
               <button
+                type="button"
                 onClick={() => setPreviewItem(null)}
-                className="text-slate-400 hover:text-white text-xs px-2 py-1 rounded-lg bg-slate-800 cursor-pointer"
+                className="text-slate-400 hover:text-white text-xs px-3 py-1.5 rounded-lg bg-slate-800 cursor-pointer min-h-[32px]"
               >
                 Close
               </button>
@@ -721,3 +755,4 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
     </div>
   );
 };
+

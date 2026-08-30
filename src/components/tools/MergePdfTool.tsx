@@ -1,12 +1,21 @@
 import React, { useState } from 'react';
 import { Layers, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
+import { DocNameInput } from '../common/DocNameInput';
 import { mergePDFs } from '../../lib/pdfEngine';
 import { getPdfPageCount } from '../../lib/pdfRenderer';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
-import { formatFileSize, generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
+import {
+  formatFileSize,
+  generateDefaultDocName,
+  ensurePdfExtension,
+  moveArrayItem,
+  triggerCelebration,
+  triggerHaptic,
+} from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -69,25 +78,14 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
     showToast(`Added ${newItems.length} PDF${newItems.length > 1 ? 's' : ''}`, 'success');
   };
 
-  const moveUp = (index: number) => {
-    if (index === 0) return;
-    const updated = [...files];
-    const temp = updated[index];
-    updated[index] = updated[index - 1];
-    updated[index - 1] = temp;
-    setFiles(updated);
-  };
-
-  const moveDown = (index: number) => {
-    if (index === files.length - 1) return;
-    const updated = [...files];
-    const temp = updated[index];
-    updated[index] = updated[index + 1];
-    updated[index + 1] = temp;
-    setFiles(updated);
+  const handleMove = (index: number, direction: 'up' | 'down') => {
+    triggerHaptic(20);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    setFiles((prev) => moveArrayItem(prev, index, targetIndex));
   };
 
   const removeFile = (id: string) => {
+    triggerHaptic(20);
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
@@ -118,11 +116,7 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
       setMergedPdf(mergedBytes);
       setIsPreviewOpen(true);
       showToast('PDFs merged successfully!', 'success');
-
-      confetti({
-        particleCount: 70,
-        spread: 50,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('MergePdfTool', 'Merge error', err);
       showToast('Error merging PDFs. Please ensure valid files.', 'error');
@@ -135,18 +129,14 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30">
-            <Layers className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">Merge PDF Files</h2>
-            <p className="text-xs text-slate-400">Combine 2 or more PDF documents into one single file offline</p>
-          </div>
-        </div>
-      </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={Layers}
+        title="Merge PDF Files"
+        subtitle="Combine 2 or more PDF documents into one single file offline"
+        badge="Instant"
+        badgeVariant="blue"
+      />
 
       {/* File Dropzone */}
       <FileDropzone
@@ -160,24 +150,28 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
 
       {/* Selected PDF List & Order Controls */}
       {files.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-4 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-4 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
-              <h3 className="text-sm font-semibold text-white">Selected Documents ({files.length})</h3>
+              <h3 className="text-sm font-bold text-white">
+                Selected Documents ({files.length})
+              </h3>
               <p className="text-xs text-slate-400">Total {totalPageCount} pages combined</p>
             </div>
 
             <div className="flex items-center space-x-2">
-              <input
-                type="text"
+              <DocNameInput
                 value={mergedFilename}
-                onChange={(e) => setMergedFilename(e.target.value)}
-                placeholder="Merged filename.pdf"
-                className="bg-slate-950/80 border border-slate-800 text-slate-100 text-xs px-3 py-1.5 rounded-xl focus:outline-none focus:border-blue-500 max-w-[180px]"
+                onChange={setMergedFilename}
+                placeholder="Merged Document"
               />
               <button
-                onClick={() => setFiles([])}
-                className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded-lg hover:bg-red-500/10 cursor-pointer"
+                type="button"
+                onClick={() => {
+                  triggerHaptic(20);
+                  setFiles([]);
+                }}
+                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
               >
                 Clear All
               </button>
@@ -208,24 +202,24 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
                 {/* Move & Delete Controls */}
                 <div className="flex items-center space-x-1 flex-shrink-0">
                   <button
-                    onClick={() => moveUp(idx)}
+                    onClick={() => handleMove(idx, 'up')}
                     disabled={idx === 0}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Move Up"
                   >
                     <ArrowUp className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => moveDown(idx)}
+                    onClick={() => handleMove(idx, 'down')}
                     disabled={idx === files.length - 1}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Move Down"
                   >
                     <ArrowDown className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => removeFile(item.id)}
-                    className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
+                    className="p-2 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Remove file"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -237,23 +231,18 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
 
           {/* Merge Action CTA */}
           <div className="pt-2">
-            <button
+            <ActionButton
               onClick={handleMerge}
-              disabled={files.length < 2 || isMerging}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-blue-600/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+              disabled={files.length < 2}
+              isLoading={isMerging}
+              loadingText="Merging Documents..."
+              icon={Layers}
+              variant="primary"
+              size="lg"
+              fullWidth
             >
-              {isMerging ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Merging Documents...</span>
-                </div>
-              ) : (
-                <>
-                  <Layers className="w-4 h-4" />
-                  <span>Merge {files.length} PDFs into One</span>
-                </>
-              )}
-            </button>
+              Merge {files.length} PDFs into One
+            </ActionButton>
           </div>
         </div>
       )}
@@ -268,3 +257,4 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
     </div>
   );
 };
+

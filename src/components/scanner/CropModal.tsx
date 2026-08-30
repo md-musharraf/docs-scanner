@@ -18,7 +18,9 @@ import {
   rotateQuad,
   getQuadMidpoints,
   clampPoint,
+  disposeCanvas,
 } from '../../utils/geometry';
+import { triggerHaptic } from '../../utils/formatters';
 import { applyImageFilter, loadImageElement } from '../../lib/imageFilters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
@@ -87,8 +89,7 @@ export const CropModal: React.FC<CropModalProps> = ({
           const detected = autoDetectDocumentCorners(canvas);
           if (isMounted) setCorners(detected);
         }
-        canvas.width = 0;
-        canvas.height = 0;
+        disposeCanvas(canvas);
       })
       .catch((err) => {
         if (isMounted) {
@@ -202,6 +203,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   const handleCornerPointerDown = (cornerKey: keyof CornerQuad, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    triggerHaptic(20);
     setDragTarget({ type: 'corner', key: cornerKey });
     setDragClientPos({ x: e.clientX, y: e.clientY });
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -211,6 +213,7 @@ export const CropModal: React.FC<CropModalProps> = ({
     if (!corners) return;
     e.preventDefault();
     e.stopPropagation();
+    triggerHaptic(20);
     const currentNatX = toNaturalX(e.clientX);
     const currentNatY = toNaturalY(e.clientY);
 
@@ -281,6 +284,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   };
 
   const handleAutoDetect = () => {
+    triggerHaptic(25);
     if (!imageSrc || !naturalSize.width) return;
     const img = new Image();
     img.onload = () => {
@@ -293,20 +297,21 @@ export const CropModal: React.FC<CropModalProps> = ({
         const detected = autoDetectDocumentCorners(canvas);
         setCorners(detected);
       }
-      canvas.width = 0;
-      canvas.height = 0;
+      disposeCanvas(canvas);
       showToast('Document boundary auto-detected', 'success');
     };
     img.src = imageSrc;
   };
 
   const handleResetFull = () => {
+    triggerHaptic(20);
     if (!naturalSize.width) return;
     setCorners(calculateDefaultCorners(naturalSize.width, naturalSize.height, 0.01));
     showToast('Reset to full frame', 'info');
   };
 
   const handleRotate = () => {
+    triggerHaptic(25);
     if (!corners || !naturalSize.width) return;
     // Rotate quad points by 90 deg clockwise
     const nextQuad = rotateQuad(corners, 90, naturalSize.width, naturalSize.height);
@@ -318,6 +323,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   const handleConfirm = async () => {
     if (!imageSrc || !corners) return;
     setIsProcessing(true);
+    triggerHaptic(30);
 
     try {
       const img = await loadImageElement(imageSrc);
@@ -363,12 +369,13 @@ export const CropModal: React.FC<CropModalProps> = ({
 
       const croppedOriginalUrl = finalCanvas.toDataURL('image/jpeg', 0.94);
 
-      // Clean memory
-      canvas.width = 0;
-      canvas.height = 0;
+      // Clean memory safely
+      disposeCanvas(canvas);
       if (finalCanvas !== canvas) {
-        finalCanvas.width = 0;
-        finalCanvas.height = 0;
+        disposeCanvas(finalCanvas);
+      }
+      if (croppedCanvas !== canvas && croppedCanvas !== finalCanvas) {
+        disposeCanvas(croppedCanvas);
       }
 
       onApplyCrop(processedUrl, croppedOriginalUrl, activeFilter);
@@ -391,8 +398,12 @@ export const CropModal: React.FC<CropModalProps> = ({
       <div className="flex items-center justify-between px-3 py-2 sm:px-4 sm:py-3 border-b border-slate-800 bg-slate-900/90 pt-[max(env(safe-area-inset-top),10px)] flex-shrink-0">
         <div className="flex items-center space-x-2 min-w-0">
           <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer flex-shrink-0"
+            type="button"
+            onClick={() => {
+              triggerHaptic(20);
+              onClose();
+            }}
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer flex-shrink-0 min-w-[36px] min-h-[36px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
@@ -406,9 +417,10 @@ export const CropModal: React.FC<CropModalProps> = ({
 
         {/* Action Button */}
         <button
+          type="button"
           onClick={handleConfirm}
           disabled={isProcessing}
-          className="flex items-center space-x-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0"
+          className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50 flex-shrink-0 min-h-[38px]"
         >
           {isProcessing ? (
             <span>Processing...</span>
@@ -570,32 +582,39 @@ export const CropModal: React.FC<CropModalProps> = ({
       <div className="bg-slate-900/95 border-t border-slate-800 p-3 space-y-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           <button
+            type="button"
             onClick={handleAutoDetect}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 text-xs font-semibold hover:bg-blue-600/30 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30 text-xs font-semibold hover:bg-blue-600/30 active:scale-95 transition-all cursor-pointer min-h-[36px]"
           >
             <Wand2 className="w-3.5 h-3.5" />
             <span>Auto Cut</span>
           </button>
 
           <button
+            type="button"
             onClick={handleResetFull}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all cursor-pointer min-h-[36px]"
           >
             <Maximize className="w-3.5 h-3.5" />
             <span>Full Page</span>
           </button>
 
           <button
+            type="button"
             onClick={handleRotate}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all cursor-pointer min-h-[36px]"
           >
             <RotateCw className="w-3.5 h-3.5" />
             <span>Rotate 90°</span>
           </button>
 
           <button
-            onClick={() => setShowLightingControls((prev) => !prev)}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 cursor-pointer ${
+            type="button"
+            onClick={() => {
+              triggerHaptic(20);
+              setShowLightingControls((prev) => !prev);
+            }}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all active:scale-95 cursor-pointer min-h-[36px] ${
               showLightingControls || autoLight
                 ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
                 : 'bg-slate-800 text-slate-300 border-slate-700'
@@ -608,13 +627,16 @@ export const CropModal: React.FC<CropModalProps> = ({
 
         {/* Lighting & Contrast Adjustments */}
         {showLightingControls && (
-          <div className="bg-slate-950/90 border border-slate-800 p-3 rounded-2xl space-y-2.5 max-w-lg mx-auto animate-in fade-in duration-150">
+          <div className="bg-slate-950/90 border border-slate-800 p-3 rounded-2xl space-y-2.5 max-w-lg mx-auto animate-in fade-in duration-150 shadow-xl">
             <div className="flex items-center justify-between">
               <label className="flex items-center space-x-2 text-xs font-semibold text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={autoLight}
-                  onChange={(e) => setAutoLight(e.target.checked)}
+                  onChange={(e) => {
+                    triggerHaptic(20);
+                    setAutoLight(e.target.checked);
+                  }}
                   className="rounded text-blue-500 accent-blue-600 cursor-pointer"
                 />
                 <span>Equalize Illumination & Whiten Paper</span>
@@ -668,10 +690,14 @@ export const CropModal: React.FC<CropModalProps> = ({
           ].map((f) => (
             <button
               key={f.id}
-              onClick={() => setActiveFilter(f.id)}
-              className={`py-1.5 px-2 rounded-xl text-center text-xs font-semibold border transition-all cursor-pointer ${
+              type="button"
+              onClick={() => {
+                triggerHaptic(20);
+                setActiveFilter(f.id);
+              }}
+              className={`py-2 px-2 rounded-xl text-center text-xs font-semibold border transition-all cursor-pointer min-h-[36px] ${
                 activeFilter === f.id
-                  ? 'bg-blue-600/25 border-blue-500 text-white shadow-sm'
+                  ? 'bg-blue-600/25 border-blue-500 text-white shadow-sm font-bold'
                   : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -683,3 +709,4 @@ export const CropModal: React.FC<CropModalProps> = ({
     </div>
   );
 };
+

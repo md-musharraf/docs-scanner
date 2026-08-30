@@ -1,12 +1,22 @@
 import React, { useState } from 'react';
-import { FileStack, ArrowUp, ArrowDown, Trash2, FileCheck, RotateCw } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import { FileStack, ArrowUp, ArrowDown, Trash2, RotateCw } from 'lucide-react';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
+import { DocNameInput } from '../common/DocNameInput';
 import { imagesToPDF } from '../../lib/pdfEngine';
 import type { ImageToPdfOptions } from '../../core/types';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
-import { generateDefaultDocName, ensurePdfExtension } from '../../utils/formatters';
+import {
+  generateDefaultDocName,
+  ensurePdfExtension,
+  moveArrayItem,
+  triggerCelebration,
+  triggerHaptic,
+} from '../../utils/formatters';
+import { rotateImageCanvas, disposeCanvas } from '../../utils/geometry';
+import { loadImageElement } from '../../lib/imageFilters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -73,50 +83,33 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
   };
 
   const handleRotateImage = async (index: number) => {
+    triggerHaptic(25);
     const target = images[index];
     if (!target) return;
 
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalHeight;
-      canvas.height = img.naturalWidth;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate((90 * Math.PI) / 180);
-        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-        const newUrl = canvas.toDataURL('image/jpeg', 0.94);
-        setImages((prev) =>
-          prev.map((item, idx) => (idx === index ? { ...item, dataUrl: newUrl } : item))
-        );
-        showToast(`Image ${index + 1} rotated`, 'info');
-      }
-      canvas.width = 0;
-      canvas.height = 0;
-    };
-    img.src = target.dataUrl;
+    try {
+      const img = await loadImageElement(target.dataUrl);
+      const canvas = rotateImageCanvas(img, 90);
+      const newUrl = canvas.toDataURL('image/jpeg', 0.94);
+      disposeCanvas(canvas);
+
+      setImages((prev) =>
+        prev.map((item, idx) => (idx === index ? { ...item, dataUrl: newUrl } : item))
+      );
+      showToast(`Image ${index + 1} rotated`, 'info');
+    } catch (err) {
+      logger.error('ImageToPdfTool', 'Rotate error', err);
+    }
   };
 
-  const moveUp = (index: number) => {
-    if (index === 0) return;
-    const updated = [...images];
-    const temp = updated[index];
-    updated[index] = updated[index - 1];
-    updated[index - 1] = temp;
-    setImages(updated);
-  };
-
-  const moveDown = (index: number) => {
-    if (index === images.length - 1) return;
-    const updated = [...images];
-    const temp = updated[index];
-    updated[index] = updated[index + 1];
-    updated[index + 1] = temp;
-    setImages(updated);
+  const handleMove = (index: number, direction: 'up' | 'down') => {
+    triggerHaptic(20);
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    setImages((prev) => moveArrayItem(prev, index, targetIndex));
   };
 
   const removeImage = (id: string) => {
+    triggerHaptic(20);
     setImages((prev) => prev.filter((img) => img.id !== id));
   };
 
@@ -145,11 +138,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
       setGeneratedPdf(pdfBytes);
       setIsPreviewOpen(true);
       showToast('PDF created from photos successfully!', 'success');
-
-      confetti({
-        particleCount: 80,
-        spread: 60,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('ImageToPdfTool', 'Error creating PDF from images', err);
       showToast('Error creating PDF from images', 'error');
@@ -160,18 +149,14 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-emerald-600/20 text-emerald-400 border border-emerald-500/30">
-            <FileStack className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">Images to PDF Maker</h2>
-            <p className="text-xs text-slate-400">Convert JPG, PNG, and camera photos into clean formatted PDF documents</p>
-          </div>
-        </div>
-      </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={FileStack}
+        title="Images to PDF Maker"
+        subtitle="Convert JPG, PNG, and camera photos into clean formatted PDF documents"
+        badge="Multi-Page"
+        badgeVariant="emerald"
+      />
 
       {/* File Dropzone */}
       <FileDropzone
@@ -184,27 +169,29 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
       />
 
       {images.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-5 shadow-xl">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
           {/* Options & Header */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-bold text-white">
                 Selected Images ({images.length})
               </h3>
               <p className="text-xs text-slate-400">Rearrange page sequence below</p>
             </div>
 
             <div className="flex items-center space-x-2">
-              <input
-                type="text"
+              <DocNameInput
                 value={docName}
-                onChange={(e) => setDocName(e.target.value)}
-                placeholder="document.pdf"
-                className="bg-slate-950/80 border border-slate-800 text-slate-100 text-xs px-3 py-1.5 rounded-xl focus:outline-none focus:border-blue-500 max-w-[180px]"
+                onChange={setDocName}
+                placeholder="Photos Document"
               />
               <button
-                onClick={() => setImages([])}
-                className="text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded-lg hover:bg-red-500/10 cursor-pointer"
+                type="button"
+                onClick={() => {
+                  triggerHaptic(20);
+                  setImages([]);
+                }}
+                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
               >
                 Clear All
               </button>
@@ -219,7 +206,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
               <select
                 value={options.pageSize}
                 onChange={(e) => setOptions({ ...options, pageSize: e.target.value as any })}
-                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-blue-500 cursor-pointer"
+                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
                 <option value="a4">A4 (Standard Document)</option>
                 <option value="letter">US Letter</option>
@@ -234,7 +221,7 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
                 value={options.orientation}
                 disabled={options.pageSize === 'fit'}
                 onChange={(e) => setOptions({ ...options, orientation: e.target.value as any })}
-                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40"
+                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40"
               >
                 <option value="portrait">Portrait (Vertical)</option>
                 <option value="landscape">Landscape (Horizontal)</option>
@@ -247,11 +234,11 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
               <select
                 value={options.margin}
                 onChange={(e) => setOptions({ ...options, margin: Number(e.target.value) })}
-                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-blue-500 cursor-pointer"
+                className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
                 <option value={0}>No Margin (Edge-to-Edge)</option>
-                <option value={15}>Small Margin</option>
-                <option value={30}>Normal Margin</option>
+                <option value={15}>Small Margin (15px)</option>
+                <option value={30}>Normal Margin (30px)</option>
               </select>
             </div>
           </div>
@@ -282,30 +269,30 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
                   <div className="flex items-center space-x-1">
                     <button
                       onClick={() => handleRotateImage(idx)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 cursor-pointer"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-slate-800 cursor-pointer"
                       title="Rotate 90°"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => moveUp(idx)}
+                      onClick={() => handleMove(idx, 'up')}
                       disabled={idx === 0}
-                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
                       title="Move Up"
                     >
                       <ArrowUp className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => moveDown(idx)}
+                      onClick={() => handleMove(idx, 'down')}
                       disabled={idx === images.length - 1}
-                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-20 cursor-pointer"
                       title="Move Down"
                     >
                       <ArrowDown className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => removeImage(img.id)}
-                      className="p-1 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
+                      className="p-1.5 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer"
                       title="Delete Image"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -317,23 +304,18 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
           </div>
 
           {/* Action CTA */}
-          <button
+          <ActionButton
             onClick={handleCreatePdf}
-            disabled={images.length === 0 || isGenerating}
-            className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-xl shadow-emerald-600/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+            disabled={images.length === 0}
+            isLoading={isGenerating}
+            loadingText="Generating PDF Document..."
+            icon={FileStack}
+            variant="emerald"
+            size="lg"
+            fullWidth
           >
-            {isGenerating ? (
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                <span>Generating PDF Document...</span>
-              </div>
-            ) : (
-              <>
-                <FileCheck className="w-4 h-4" />
-                <span>Create PDF from {images.length} Images</span>
-              </>
-            )}
-          </button>
+            Create PDF from {images.length} Images
+          </ActionButton>
         </div>
       )}
 
@@ -347,3 +329,4 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
     </div>
   );
 };
+

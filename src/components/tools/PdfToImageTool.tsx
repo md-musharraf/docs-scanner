@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Image as ImageIcon, Download, Archive, Eye } from 'lucide-react';
 import JSZip from 'jszip';
-import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
 import { renderAllPdfPages } from '../../lib/pdfRenderer';
 import type { RenderedPage } from '../../core/types';
 import { downloadFile } from '../../lib/storage';
+import { triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -29,10 +31,7 @@ export const PdfToImageTool: React.FC = () => {
       });
       setRenderedPages(pages);
       showToast(`Converted ${pages.length} pages to images!`, 'success');
-      confetti({
-        particleCount: 50,
-        spread: 60,
-      });
+      triggerCelebration(50);
     } catch (err) {
       logger.error('PdfToImageTool', 'Error converting PDF to images', err);
       showToast('Failed to convert PDF to images. Please check the file.', 'error');
@@ -49,10 +48,12 @@ export const PdfToImageTool: React.FC = () => {
   };
 
   const handleFormatChange = (newFormat: 'jpeg' | 'png') => {
+    triggerHaptic(20);
     setFormat(newFormat);
   };
 
   const handleScaleChange = async (newScale: number) => {
+    triggerHaptic(20);
     setScale(newScale);
     if (file) {
       await processPdfToImages(file, newScale);
@@ -60,6 +61,7 @@ export const PdfToImageTool: React.FC = () => {
   };
 
   const handleDownloadSingle = async (page: RenderedPage) => {
+    triggerHaptic(25);
     const baseName = file?.name.replace(/\.pdf$/i, '') || 'document';
     const ext = format === 'png' ? 'png' : 'jpg';
     const filename = `${baseName}_page_${page.pageNumber}.${ext}`;
@@ -92,11 +94,7 @@ export const PdfToImageTool: React.FC = () => {
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       await downloadFile(zipBlob, `${baseName}_images.zip`, 'application/zip');
       showToast('ZIP archive saved!', 'success');
-
-      confetti({
-        particleCount: 70,
-        spread: 70,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('PdfToImageTool', 'ZIP error', err);
       showToast('Error creating ZIP archive', 'error');
@@ -107,18 +105,14 @@ export const PdfToImageTool: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-cyan-600/20 text-cyan-400 border border-cyan-500/30">
-            <ImageIcon className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">PDF to Image (JPG/PNG)</h2>
-            <p className="text-xs text-slate-400">Extract every page of a PDF as crisp, high-resolution images offline</p>
-          </div>
-        </div>
-      </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={ImageIcon}
+        title="PDF to Image Converter"
+        subtitle="Extract every page of a PDF as crisp, high-resolution JPG or PNG offline"
+        badge="HD Render"
+        badgeVariant="cyan"
+      />
 
       {!file && (
         <FileDropzone
@@ -146,10 +140,10 @@ export const PdfToImageTool: React.FC = () => {
 
       {/* Result Gallery & Controls */}
       {renderedPages.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-5 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
-              <h3 className="text-sm font-semibold text-white truncate max-w-sm">
+              <h3 className="text-sm font-bold text-white truncate max-w-sm">
                 {file?.name}
               </h3>
               <p className="text-xs text-slate-400">
@@ -161,16 +155,18 @@ export const PdfToImageTool: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center space-x-1 bg-slate-950/70 p-1 rounded-xl border border-slate-800">
                 <button
+                  type="button"
                   onClick={() => handleFormatChange('jpeg')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer min-h-[32px] ${
                     format === 'jpeg' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   JPG
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleFormatChange('png')}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer min-h-[32px] ${
                     format === 'png' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -181,34 +177,32 @@ export const PdfToImageTool: React.FC = () => {
               <select
                 value={scale}
                 onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
-                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer"
+                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-xl cursor-pointer min-h-[36px]"
               >
                 <option value={1.2}>1.2x Fast</option>
-                <option value={1.5}>1.5x Medium</option>
+                <option value={1.5}>1.5x Balanced</option>
                 <option value={2.0}>2.0x Crisp HD</option>
               </select>
 
-              <button
+              <ActionButton
                 onClick={handleDownloadAllZip}
-                disabled={isZipping}
-                className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                isLoading={isZipping}
+                loadingText="Zipping..."
+                icon={Archive}
+                variant="primary"
+                size="sm"
               >
-                {isZipping ? (
-                  <span>Zipping...</span>
-                ) : (
-                  <>
-                    <Archive className="w-3.5 h-3.5" />
-                    <span>Download (ZIP)</span>
-                  </>
-                )}
-              </button>
+                Download ZIP
+              </ActionButton>
 
               <button
+                type="button"
                 onClick={() => {
+                  triggerHaptic(20);
                   setFile(null);
                   setRenderedPages([]);
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[36px]"
               >
                 New PDF
               </button>
@@ -223,7 +217,10 @@ export const PdfToImageTool: React.FC = () => {
                 className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/70 p-3 space-y-3 hover:border-slate-700 transition-colors"
               >
                 <div
-                  onClick={() => setPreviewImage(page.dataUrl)}
+                  onClick={() => {
+                    triggerHaptic(20);
+                    setPreviewImage(page.dataUrl);
+                  }}
                   className="aspect-[3/4] w-full rounded-xl overflow-hidden bg-white cursor-pointer group relative shadow-inner"
                 >
                   <img
@@ -242,8 +239,9 @@ export const PdfToImageTool: React.FC = () => {
                   </span>
 
                   <button
+                    type="button"
                     onClick={() => handleDownloadSingle(page)}
-                    className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-semibold transition-colors cursor-pointer min-h-[36px]"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Save Image</span>
@@ -269,3 +267,4 @@ export const PdfToImageTool: React.FC = () => {
     </div>
   );
 };
+

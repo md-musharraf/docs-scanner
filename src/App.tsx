@@ -1,20 +1,39 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Header } from './components/layout/Header';
 import { Navigation } from './components/layout/Navigation';
 import type { ActiveTab } from './components/layout/Navigation';
-import { CameraScanner } from './components/scanner/CameraScanner';
-import { MergePdfTool } from './components/tools/MergePdfTool';
-import { SplitPdfTool } from './components/tools/SplitPdfTool';
-import { PdfToImageTool } from './components/tools/PdfToImageTool';
-import { ImageToPdfTool } from './components/tools/ImageToPdfTool';
-import { PdfTools } from './components/tools/PdfTools';
-import { ResizeCompressTool } from './components/tools/ResizeCompressTool';
-import { SavedDocsView } from './components/tools/SavedDocsView';
+import { LoadingSkeleton } from './components/common/LoadingSkeleton';
 import { getAllSavedDocuments } from './lib/storage';
 import type { SavedDocumentMetadata } from './core/types';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { ToastProvider } from './components/common/Toast';
 import { logger } from './core/logger';
+
+// Lazy-loaded heavy tool components for fast initial load & reduced memory
+const CameraScanner = lazy(() =>
+  import('./components/scanner/CameraScanner').then((m) => ({ default: m.CameraScanner }))
+);
+const MergePdfTool = lazy(() =>
+  import('./components/tools/MergePdfTool').then((m) => ({ default: m.MergePdfTool }))
+);
+const SplitPdfTool = lazy(() =>
+  import('./components/tools/SplitPdfTool').then((m) => ({ default: m.SplitPdfTool }))
+);
+const PdfToImageTool = lazy(() =>
+  import('./components/tools/PdfToImageTool').then((m) => ({ default: m.PdfToImageTool }))
+);
+const ImageToPdfTool = lazy(() =>
+  import('./components/tools/ImageToPdfTool').then((m) => ({ default: m.ImageToPdfTool }))
+);
+const PdfTools = lazy(() =>
+  import('./components/tools/PdfTools').then((m) => ({ default: m.PdfTools }))
+);
+const ResizeCompressTool = lazy(() =>
+  import('./components/tools/ResizeCompressTool').then((m) => ({ default: m.ResizeCompressTool }))
+);
+const SavedDocsView = lazy(() =>
+  import('./components/tools/SavedDocsView').then((m) => ({ default: m.SavedDocsView }))
+);
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -93,32 +112,34 @@ export function AppContent() {
         savedCount={savedDocs.length}
       />
 
-      {/* Main Content Area */}
+      {/* Main Content Area with Suspense Code Splitting */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 md:p-8 pb-28 md:pb-8">
-        {activeTab === 'scan' && (
-          <CameraScanner onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'resize' && (
-          <ResizeCompressTool onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'merge' && (
-          <MergePdfTool onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'split' && (
-          <SplitPdfTool onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'pdf2img' && (
-          <PdfToImageTool />
-        )}
-        {activeTab === 'img2pdf' && (
-          <ImageToPdfTool onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'tools' && (
-          <PdfTools onDocumentSaved={refreshSavedDocs} />
-        )}
-        {activeTab === 'saved' && (
-          <SavedDocsView documents={savedDocs} onRefresh={refreshSavedDocs} />
-        )}
+        <Suspense fallback={<LoadingSkeleton />}>
+          {activeTab === 'scan' && (
+            <CameraScanner onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'resize' && (
+            <ResizeCompressTool onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'merge' && (
+            <MergePdfTool onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'split' && (
+            <SplitPdfTool onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'pdf2img' && (
+            <PdfToImageTool />
+          )}
+          {activeTab === 'img2pdf' && (
+            <ImageToPdfTool onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'tools' && (
+            <PdfTools onDocumentSaved={refreshSavedDocs} />
+          )}
+          {activeTab === 'saved' && (
+            <SavedDocsView documents={savedDocs} onRefresh={refreshSavedDocs} />
+          )}
+        </Suspense>
       </main>
     </div>
   );
@@ -135,3 +156,4 @@ export function App() {
 }
 
 export default App;
+

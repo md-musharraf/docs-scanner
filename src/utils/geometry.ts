@@ -248,3 +248,51 @@ export function solvePerspectiveTransform(src: Point[], dst: Point[]): number[] 
 
   return h;
 }
+
+/**
+ * Universal memory-safe canvas rotation (90, 180, 270 deg)
+ */
+export function rotateImageCanvas(
+  source: HTMLImageElement | HTMLCanvasElement,
+  angleDegrees: number = 90
+): HTMLCanvasElement {
+  const norm = ((angleDegrees % 360) + 360) % 360;
+  const srcW = source instanceof HTMLImageElement ? source.naturalWidth || source.width : source.width;
+  const srcH = source instanceof HTMLImageElement ? source.naturalHeight || source.height : source.height;
+
+  const canvas = document.createElement('canvas');
+  if (norm === 90 || norm === 270) {
+    canvas.width = srcH;
+    canvas.height = srcW;
+  } else {
+    canvas.width = srcW;
+    canvas.height = srcH;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((norm * Math.PI) / 180);
+  ctx.drawImage(source, -srcW / 2, -srcH / 2);
+
+  return canvas;
+}
+
+/**
+ * Memory-safe canvas destruction to prevent memory bloat
+ */
+export function disposeCanvas(canvas: HTMLCanvasElement | null | undefined): void {
+  if (!canvas) return;
+  try {
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    canvas.width = 0;
+    canvas.height = 0;
+  } catch {
+    // Ignore dispose errors
+  }
+}
+

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { FolderArchive, Trash2, Download, Eye, FileText, Search, Share2, Calendar, HardDrive } from 'lucide-react';
+import { ToolHeader } from '../common/ToolHeader';
 import { deleteDocument, downloadFile, shareDocument, getDocumentData } from '../../lib/storage';
 import type { SavedDocumentMetadata } from '../../core/types';
 import { PdfViewerModal } from '../common/PdfViewerModal';
-import { formatFileSize, formatDate } from '../../utils/formatters';
+import { formatFileSize, formatDate, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -25,6 +26,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
   );
 
   const handleDelete = async (id: string, name: string) => {
+    triggerHaptic(30);
     if (window.confirm(`Delete "${name}" from offline storage?`)) {
       try {
         await deleteDocument(id);
@@ -38,6 +40,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
   };
 
   const handleOpenPreview = async (doc: SavedDocumentMetadata) => {
+    triggerHaptic(20);
     setLoadingDocId(doc.id);
     try {
       const data = await getDocumentData(doc.id);
@@ -57,6 +60,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
   };
 
   const handleDownload = async (doc: SavedDocumentMetadata) => {
+    triggerHaptic(25);
     try {
       const data = await getDocumentData(doc.id);
       if (data) {
@@ -72,6 +76,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
   };
 
   const handleShare = async (doc: SavedDocumentMetadata) => {
+    triggerHaptic(25);
     try {
       const data = await getDocumentData(doc.id);
       if (data) {
@@ -89,25 +94,17 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-2xl bg-blue-600/20 text-blue-400 border border-blue-500/30">
-              <FolderArchive className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white">Offline Library</h2>
-              <p className="text-xs text-slate-400">
-                {documents.length} documents saved • {formatFileSize(totalStorageBytes)} on-device
-              </p>
-            </div>
-          </div>
-
-          {/* Search Box */}
-          {documents.length > 0 && (
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={FolderArchive}
+        title="Offline Library"
+        subtitle={`${documents.length} documents saved • ${formatFileSize(totalStorageBytes)} on-device`}
+        badge="IndexedDB"
+        badgeVariant="blue"
+        actionSlot={
+          documents.length > 0 ? (
             <div className="flex items-center space-x-2 bg-slate-950/80 border border-slate-800 rounded-2xl px-3 py-1.5 w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-500" />
+              <Search className="w-4 h-4 text-slate-500 flex-shrink-0" />
               <input
                 type="text"
                 value={searchQuery}
@@ -116,18 +113,18 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
                 className="bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none w-full"
               />
             </div>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
       {/* Empty State */}
       {documents.length === 0 && (
-        <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-12 text-center space-y-4">
+        <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-12 text-center space-y-4 shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-slate-800 text-slate-500 flex items-center justify-center mx-auto">
             <HardDrive className="w-8 h-8" />
           </div>
           <div className="max-w-xs mx-auto space-y-1">
-            <h3 className="text-base font-semibold text-slate-200">No Documents Saved Yet</h3>
+            <h3 className="text-base font-bold text-slate-200">No Documents Saved Yet</h3>
             <p className="text-xs text-slate-400">
               Scanned pages, merged PDFs, and created files will automatically be accessible here offline.
             </p>
@@ -141,7 +138,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
           {filtered.map((doc) => (
             <div
               key={doc.id}
-              className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md group"
+              className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-5 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md group"
             >
               <div className="flex items-start space-x-3.5">
                 {/* Thumbnail or File Icon */}
@@ -167,7 +164,7 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
                 <div className="flex-1 min-w-0">
                   <h4
                     onClick={() => handleOpenPreview(doc)}
-                    className="text-sm font-semibold text-white truncate hover:text-blue-400 transition-colors cursor-pointer"
+                    className="text-sm font-bold text-white truncate hover:text-blue-400 transition-colors cursor-pointer"
                   >
                     {doc.name}
                   </h4>
@@ -191,9 +188,10 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
               {/* Action Buttons */}
               <div className="flex items-center justify-between pt-4 mt-3 border-t border-slate-800/80">
                 <button
+                  type="button"
                   onClick={() => handleOpenPreview(doc)}
                   disabled={loadingDocId === doc.id}
-                  className="flex items-center space-x-1.5 text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer disabled:opacity-50"
+                  className="flex items-center space-x-1.5 text-xs text-blue-400 hover:text-blue-300 font-semibold cursor-pointer disabled:opacity-50 min-h-[36px]"
                 >
                   <Eye className="w-3.5 h-3.5" />
                   <span>{loadingDocId === doc.id ? 'Loading...' : 'Preview'}</span>
@@ -201,27 +199,30 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
 
                 <div className="flex items-center space-x-1">
                   <button
+                    type="button"
                     onClick={() => handleShare(doc)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Share"
                   >
-                    <Share2 className="w-3.5 h-3.5" />
+                    <Share2 className="w-4 h-4" />
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleDownload(doc)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="p-2 rounded-xl text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Download"
                   >
-                    <Download className="w-3.5 h-3.5" />
+                    <Download className="w-4 h-4" />
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleDelete(doc.id, doc.name)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                    className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
                     title="Delete"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -246,3 +247,4 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
     </div>
   );
 };
+

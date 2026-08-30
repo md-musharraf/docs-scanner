@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { Scissors, Check, Archive, FileText } from 'lucide-react';
 import JSZip from 'jszip';
-import confetti from 'canvas-confetti';
 import { FileDropzone } from '../common/FileDropzone';
+import { ToolHeader } from '../common/ToolHeader';
+import { ActionButton } from '../common/ActionButton';
 import { renderAllPdfPages } from '../../lib/pdfRenderer';
 import type { RenderedPage } from '../../core/types';
 import { splitPDF } from '../../lib/pdfEngine';
 import { saveDocumentLocally, downloadFile } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
-import { ensurePdfExtension } from '../../utils/formatters';
+import { ensurePdfExtension, triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -59,20 +60,24 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
   };
 
   const togglePageSelection = (pageNum: number) => {
+    triggerHaptic(20);
     setSelectedPages((prev) =>
       prev.includes(pageNum) ? prev.filter((p) => p !== pageNum) : [...prev, pageNum].sort((a, b) => a - b)
     );
   };
 
   const selectAll = () => {
+    triggerHaptic(20);
     setSelectedPages(renderedPages.map((p) => p.pageNumber));
   };
 
   const deselectAll = () => {
+    triggerHaptic(20);
     setSelectedPages([]);
   };
 
   const applyRangeInput = () => {
+    triggerHaptic(25);
     if (!rangeInput.trim()) return;
     const parts = rangeInput.split(',');
     const selected = new Set<number>();
@@ -126,11 +131,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       setSplitPdfData(extractedBytes);
       setIsPreviewOpen(true);
       showToast('Extracted pages saved to new PDF!', 'success');
-
-      confetti({
-        particleCount: 70,
-        spread: 50,
-      });
+      triggerCelebration();
     } catch (err) {
       logger.error('SplitPdfTool', 'Extract error', err);
       showToast('Error extracting pages', 'error');
@@ -164,18 +165,14 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-28 md:pb-8 animate-in fade-in duration-300">
-      {/* Header Banner */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 backdrop-blur-md">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2.5 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-            <Scissors className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">Split & Extract PDF Pages</h2>
-            <p className="text-xs text-slate-400">Select specific pages or a range to create a new PDF offline</p>
-          </div>
-        </div>
-      </div>
+      {/* Reusable Tool Header */}
+      <ToolHeader
+        icon={Scissors}
+        title="Split & Extract PDF Pages"
+        subtitle="Select specific pages or a range to create a new PDF offline"
+        badge="Page Selector"
+        badgeVariant="indigo"
+      />
 
       {!file && (
         <FileDropzone
@@ -191,7 +188,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
       {/* Loading Progress Indicator */}
       {isLoadingPages && (
         <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
-          <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+          <div className="w-12 h-12 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mx-auto"></div>
           <div>
             <h3 className="text-base font-semibold text-white">Rendering Pages...</h3>
             <p className="text-xs text-slate-400">
@@ -203,10 +200,10 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
 
       {/* Page Selection Grid & Controls */}
       {renderedPages.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 backdrop-blur-md space-y-5 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
-              <h3 className="text-sm font-semibold text-white truncate max-w-sm">
+              <h3 className="text-sm font-bold text-white truncate max-w-sm">
                 {file?.name}
               </h3>
               <p className="text-xs text-slate-400">
@@ -217,24 +214,28 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
             {/* Quick Select Buttons */}
             <div className="flex flex-wrap items-center gap-2">
               <button
+                type="button"
                 onClick={selectAll}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[36px]"
               >
                 Select All
               </button>
               <button
+                type="button"
                 onClick={deselectAll}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[36px]"
               >
                 Deselect All
               </button>
               <button
+                type="button"
                 onClick={() => {
+                  triggerHaptic(20);
                   setFile(null);
                   setRenderedPages([]);
                   setSelectedPages([]);
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-400 cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-400 cursor-pointer transition-colors min-h-[36px]"
               >
                 Change PDF
               </button>
@@ -252,8 +253,9 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
               className="bg-transparent text-xs text-slate-100 placeholder-slate-500 focus:outline-none flex-1 font-mono"
             />
             <button
+              type="button"
               onClick={applyRangeInput}
-              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl cursor-pointer"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors min-h-[32px]"
             >
               Apply
             </button>
@@ -269,7 +271,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
                   onClick={() => togglePageSelection(page.pageNumber)}
                   className={`relative rounded-2xl overflow-hidden border-2 transition-all cursor-pointer group bg-slate-950 flex flex-col ${
                     isSelected
-                      ? 'border-blue-500 ring-2 ring-blue-500/40'
+                      ? 'border-indigo-500 ring-2 ring-indigo-500/40'
                       : 'border-slate-800/80 opacity-60 hover:opacity-100 hover:border-slate-700'
                   }`}
                 >
@@ -288,7 +290,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
                     </span>
                     <div
                       className={`w-5 h-5 rounded-lg flex items-center justify-center text-xs transition-colors ${
-                        isSelected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-transparent border border-slate-700'
+                        isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-transparent border border-slate-700'
                       }`}
                     >
                       <Check className="w-3.5 h-3.5" />
@@ -301,41 +303,31 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
 
           {/* Extract CTAs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
+            <ActionButton
               onClick={handleExtract}
-              disabled={selectedPages.length === 0 || isSplitting || isZipping}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-indigo-600/30 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+              disabled={selectedPages.length === 0}
+              isLoading={isSplitting}
+              loadingText="Creating PDF..."
+              icon={FileText}
+              variant="indigo"
+              size="lg"
+              fullWidth
             >
-              {isSplitting ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Creating PDF...</span>
-                </div>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  <span>Extract as Single PDF ({selectedPages.length} Pages)</span>
-                </>
-              )}
-            </button>
+              Extract as Single PDF ({selectedPages.length} Pages)
+            </ActionButton>
 
-            <button
+            <ActionButton
               onClick={handleExtractZip}
-              disabled={selectedPages.length === 0 || isSplitting || isZipping}
-              className="w-full flex items-center justify-center space-x-2 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99] transition-all cursor-pointer"
+              disabled={selectedPages.length === 0}
+              isLoading={isZipping}
+              loadingText="Zipping Files..."
+              icon={Archive}
+              variant="secondary"
+              size="lg"
+              fullWidth
             >
-              {isZipping ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <span>Zipping Files...</span>
-                </div>
-              ) : (
-                <>
-                  <Archive className="w-4 h-4 text-indigo-400" />
-                  <span>Download Each Page as PDF (ZIP)</span>
-                </>
-              )}
-            </button>
+              Download Each Page as PDF (ZIP)
+            </ActionButton>
           </div>
         </div>
       )}
@@ -350,3 +342,4 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
     </div>
   );
 };
+
