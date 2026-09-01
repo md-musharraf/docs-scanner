@@ -189,23 +189,44 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     try {
       const blob = new Blob([pdfData as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.src = url;
-      document.body.appendChild(iframe);
-      iframe.onload = () => {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-        setTimeout(() => {
-          document.body.removeChild(iframe);
+      // Try opening in a new window for more reliable printing
+      const printWindow = window.open(url, '_blank');
+      if (printWindow) {
+        printWindow.addEventListener('afterprint', () => {
+          printWindow.close();
           URL.revokeObjectURL(url);
-        }, 60000);
-      };
+        });
+        // Fallback cleanup if user closes the window without printing
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+      } else {
+        // Fallback: use iframe approach
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '1px';
+        iframe.style.height = '1px';
+        iframe.style.border = '0';
+        iframe.style.opacity = '0.01';
+        iframe.src = url;
+        document.body.appendChild(iframe);
+
+        // Guaranteed cleanup even if onload doesn't fire
+        const cleanupTimer = setTimeout(() => {
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+          URL.revokeObjectURL(url);
+        }, 15000);
+
+        iframe.onload = () => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          clearTimeout(cleanupTimer);
+          setTimeout(() => {
+            if (document.body.contains(iframe)) document.body.removeChild(iframe);
+            URL.revokeObjectURL(url);
+          }, 60000);
+        };
+      }
     } catch (err) {
       logger.error('PdfViewer', 'Print error', err);
       showToast('Printing not supported on this device', 'info');
@@ -216,12 +237,17 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     triggerHaptic(20);
     if (!document.fullscreenElement) {
       modalRef.current?.requestFullscreen?.().catch(() => {});
-      setIsFullscreen(true);
     } else {
       document.exitFullscreen?.().catch(() => {});
-      setIsFullscreen(false);
     }
   };
+
+  // Sync fullscreen state with browser's fullscreen API
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
 
   const handleRotateView = () => {
     triggerHaptic(20);
@@ -364,7 +390,12 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
             <img
               src={pageImage}
               alt={`Page ${currentPage}`}
-              className="max-w-full max-h-[72vh] object-contain select-none block"
+              className={`object-contain select-none block ${
+                scale <= 1.4
+                  ? 'max-w-full max-h-[72vh]'
+                  : ''
+              }`}
+              style={scale > 1.4 ? { width: 'auto', height: 'auto' } : undefined}
             />
           </div>
         ) : null}

@@ -56,6 +56,43 @@ export async function splitPDF(pdfBuffer: ArrayBuffer, pageIndices: number[]): P
 }
 
 /**
+ * Convert a non-JPEG/PNG data URL to JPEG via offscreen canvas.
+ * pdf-lib only supports JPEG and PNG embedding, so WebP, GIF, BMP,
+ * HEIC, etc. must be converted before passing to embedJpg/embedPng.
+ */
+async function ensureJpegOrPngDataUrl(dataUrl: string): Promise<string> {
+  if (dataUrl.startsWith('data:image/png') || dataUrl.startsWith('data:image/jpeg') || dataUrl.startsWith('data:image/jpg')) {
+    return dataUrl;
+  }
+  // Convert unsupported format to JPEG via canvas
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        canvas.width = 0;
+        canvas.height = 0;
+        reject(new Error('Canvas context unavailable'));
+        return;
+      }
+      // Fill white background for transparency safety
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
+      canvas.width = 0;
+      canvas.height = 0;
+      resolve(jpegUrl);
+    };
+    img.onerror = () => reject(new Error('Failed to load image for format conversion'));
+    img.src = dataUrl;
+  });
+}
+
+/**
  * Convert an array of image data URLs to a multi-page PDF
  */
 export async function imagesToPDF(
@@ -67,11 +104,14 @@ export async function imagesToPDF(
     const pdfDoc = await PDFDocument.create();
 
     for (const imgItem of images) {
+      // Ensure we have a format pdf-lib can handle
+      const safeDataUrl = await ensureJpegOrPngDataUrl(imgItem.dataUrl);
+
       let embeddedImage;
-      if (imgItem.dataUrl.startsWith('data:image/png')) {
-        embeddedImage = await pdfDoc.embedPng(imgItem.dataUrl);
+      if (safeDataUrl.startsWith('data:image/png')) {
+        embeddedImage = await pdfDoc.embedPng(safeDataUrl);
       } else {
-        embeddedImage = await pdfDoc.embedJpg(imgItem.dataUrl);
+        embeddedImage = await pdfDoc.embedJpg(safeDataUrl);
       }
 
       const imgWidth = embeddedImage.width;
@@ -177,10 +217,21 @@ export async function addWatermarkToPDF(
       const { width, height } = page.getSize();
       const textWidth = font.widthOfTextAtSize(options.text, fontSize);
       const textHeight = font.heightAtSize(fontSize);
+      // Calculate center position accounting for rotation
+      const angleRad = ((options.angle !== undefined ? options.angle : -45) * Math.PI) / 180;
+      const cosA = Math.cos(angleRad);
+      const sinA = Math.sin(angleRad);
+      // The anchor point for drawText is the baseline-left of the text.
+      // After rotation around anchor, we need to offset so the rotated
+      // bounding box center aligns with the page center.
+      const cx = width / 2;
+      const cy = height / 2;
+      const x = cx - (textWidth * cosA - textHeight * sinA) / 2;
+      const y = cy - (textWidth * sinA + textHeight * cosA) / 2;
 
       page.drawText(options.text, {
-        x: width / 2 - textWidth / 3,
-        y: height / 2 - textHeight / 3,
+        x,
+        y,
         size: fontSize,
         font,
         color,

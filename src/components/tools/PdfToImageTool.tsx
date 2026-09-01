@@ -22,13 +22,13 @@ export const PdfToImageTool: React.FC = () => {
   const [isZipping, setIsZipping] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
-  const processPdfToImages = async (pdfFile: File, currentScale: number) => {
+  const processPdfToImages = async (pdfFile: File, currentScale: number, imgFormat: 'jpeg' | 'png' = 'jpeg') => {
     setIsRendering(true);
     try {
       const buffer = await pdfFile.arrayBuffer();
       const pages = await renderAllPdfPages(buffer, currentScale, (current, total) => {
         setProgress({ current, total });
-      });
+      }, imgFormat);
       setRenderedPages(pages);
       showToast(`Converted ${pages.length} pages to images!`, 'success');
       triggerCelebration(50);
@@ -44,12 +44,16 @@ export const PdfToImageTool: React.FC = () => {
     if (files.length === 0) return;
     const selectedFile = files[0];
     setFile(selectedFile);
-    await processPdfToImages(selectedFile, scale);
+    await processPdfToImages(selectedFile, scale, format);
   };
 
-  const handleFormatChange = (newFormat: 'jpeg' | 'png') => {
+  const handleFormatChange = async (newFormat: 'jpeg' | 'png') => {
     triggerHaptic(20);
     setFormat(newFormat);
+    // Re-render pages in the new format
+    if (file) {
+      await processPdfToImages(file, scale, newFormat);
+    }
   };
 
   const handleScaleChange = async (newScale: number) => {

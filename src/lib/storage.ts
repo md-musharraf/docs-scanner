@@ -112,6 +112,26 @@ export async function getDocumentData(id: string): Promise<Uint8Array | null> {
 }
 
 /**
+ * Rename a saved document in-place, preserving creation timestamp and other metadata
+ */
+export async function renameDocument(id: string, newName: string): Promise<void> {
+  try {
+    const existing = await get<SavedDocumentMetadata>(`${META_PREFIX}${id}`);
+    if (existing) {
+      const updated: SavedDocumentMetadata = {
+        ...existing,
+        name: newName,
+      };
+      await set(`${META_PREFIX}${id}`, updated);
+      logger.info('Storage', `Renamed document: ${id} to ${newName}`);
+    }
+  } catch (err) {
+    logger.error('Storage', `Error renaming document ${id}`, err);
+    throw err;
+  }
+}
+
+/**
  * Delete a saved document and its binary data from IndexedDB
  */
 export async function deleteDocument(id: string): Promise<void> {

@@ -13,7 +13,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  * Get total number of pages in a PDF file with resource cleanup
  */
 export async function getPdfPageCount(data: ArrayBuffer | Uint8Array): Promise<number> {
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data).slice() });
   try {
     const pdf = await loadingTask.promise;
     const count = pdf.numPages;
@@ -32,9 +32,10 @@ export async function getPdfPageCount(data: ArrayBuffer | Uint8Array): Promise<n
 export async function renderPdfPage(
   data: ArrayBuffer | Uint8Array,
   pageNumber: number,
-  scale: number = APP_CONFIG.defaultRenderScale
+  scale: number = APP_CONFIG.defaultRenderScale,
+  format: 'jpeg' | 'png' = 'jpeg'
 ): Promise<RenderedPage> {
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data).slice() });
   let pdf: pdfjsLib.PDFDocumentProxy | null = null;
   const canvas = document.createElement('canvas');
 
@@ -58,7 +59,9 @@ export async function renderPdfPage(
       canvas: canvas as any,
     }).promise;
 
-    const dataUrl = canvas.toDataURL('image/jpeg', APP_CONFIG.defaultJpegQuality);
+    const dataUrl = format === 'png'
+      ? canvas.toDataURL('image/png')
+      : canvas.toDataURL('image/jpeg', APP_CONFIG.defaultJpegQuality);
 
     return {
       pageNumber,
@@ -83,10 +86,11 @@ export async function renderPdfPage(
 export async function renderAllPdfPages(
   data: ArrayBuffer | Uint8Array,
   scale: number = APP_CONFIG.highResScale,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  format: 'jpeg' | 'png' = 'jpeg'
 ): Promise<RenderedPage[]> {
   logger.time('RenderAllPdfPages');
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) });
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data).slice() });
   const pages: RenderedPage[] = [];
 
   try {
@@ -109,9 +113,13 @@ export async function renderAllPdfPages(
           canvas: canvas as any,
         }).promise;
 
+        const dataUrl = format === 'png'
+          ? canvas.toDataURL('image/png')
+          : canvas.toDataURL('image/jpeg', APP_CONFIG.defaultJpegQuality);
+
         pages.push({
           pageNumber: i,
-          dataUrl: canvas.toDataURL('image/jpeg', APP_CONFIG.defaultJpegQuality),
+          dataUrl,
           width: viewport.width,
           height: viewport.height,
         });

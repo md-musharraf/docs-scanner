@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Minimize2,
   Download,
@@ -22,7 +22,7 @@ import {
 import type { CompressionResult } from '../../services/imageCompressor';
 import { downloadFile, saveDocumentLocally } from '../../lib/storage';
 import { imagesToPDF } from '../../lib/pdfEngine';
-import { formatFileSize, ensurePdfExtension, triggerCelebration, triggerHaptic } from '../../utils/formatters';
+import { formatFileSize, ensurePdfExtension, sanitizeFilename, triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -84,6 +84,26 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   const [isZipping, setIsZipping] = useState(false);
   const [isPdfExporting, setIsPdfExporting] = useState(false);
   const [previewItem, setPreviewItem] = useState<ImageItem | null>(null);
+
+  // Keep a ref of images for unmount cleanup
+  const imagesRef = useRef<ImageItem[]>(images);
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
+
+  useEffect(() => {
+    return () => {
+      imagesRef.current.forEach((img) => {
+        if (img.originalUrl) {
+          try {
+            URL.revokeObjectURL(img.originalUrl);
+          } catch {
+            // ignore
+          }
+        }
+      });
+    };
+  }, []);
 
   const handleFilesSelected = async (files: File[]) => {
     const imgFiles = files.filter((f) => f.type.startsWith('image/'));
@@ -190,7 +210,8 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   const handleDownloadSingle = async (item: ImageItem) => {
     if (!item.result) return;
     triggerHaptic(25);
-    const baseName = item.name.replace(/\.[^/.]+$/, '');
+    const rawBaseName = item.name.replace(/\.[^/.]+$/, '');
+    const baseName = sanitizeFilename(rawBaseName, 'image');
     const ext = item.result.format === 'image/png' ? 'png' : item.result.format === 'image/webp' ? 'webp' : 'jpg';
     const filename = `${baseName}_resized_${Math.round(item.result.sizeBytes / 1024)}kb.${ext}`;
 
@@ -212,7 +233,8 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       const zip = new JSZip();
       for (const item of compressed) {
         if (item.result) {
-          const baseName = item.name.replace(/\.[^/.]+$/, '');
+          const rawBaseName = item.name.replace(/\.[^/.]+$/, '');
+          const baseName = sanitizeFilename(rawBaseName, 'image');
           const ext = item.result.format === 'image/png' ? 'png' : item.result.format === 'image/webp' ? 'webp' : 'jpg';
           zip.file(`${baseName}_${Math.round(item.result.sizeBytes / 1024)}kb.${ext}`, item.result.blob);
         }
@@ -573,9 +595,11 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
                 <span className="break-all">
                   Reduced: {formatFileSize(totalOriginalBytes)} ➔{' '}
                   {formatFileSize(totalCompressedBytes)} (
-                  {Math.round(
-                    ((totalOriginalBytes - totalCompressedBytes) / totalOriginalBytes) * 100
-                  )}
+                  {totalOriginalBytes > 0
+                    ? Math.round(
+                        ((totalOriginalBytes - totalCompressedBytes) / totalOriginalBytes) * 100
+                      )
+                    : 0}
                   % Saved)
                 </span>
               </div>

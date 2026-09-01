@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { ToolHeader } from '../common/ToolHeader';
-import { deleteDocument, downloadFile, shareDocument, getDocumentData, saveDocumentLocally } from '../../lib/storage';
+import { deleteDocument, downloadFile, shareDocument, getDocumentData, renameDocument } from '../../lib/storage';
 import type { SavedDocumentMetadata } from '../../core/types';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { formatFileSize, formatDate, triggerHaptic, sanitizeFilename } from '../../utils/formatters';
@@ -102,19 +102,9 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
     const finalName = cleanName.toLowerCase().endsWith('.pdf') ? cleanName : `${cleanName}.pdf`;
 
     try {
-      const data = await getDocumentData(doc.id);
-      if (data) {
-        await deleteDocument(doc.id);
-        await saveDocumentLocally({
-          name: finalName,
-          sizeBytes: doc.sizeBytes,
-          pageCount: doc.pageCount,
-          thumbnailUrl: doc.thumbnailUrl,
-          data,
-        });
-        showToast(`Renamed to ${finalName}`, 'success');
-        onRefresh();
-      }
+      await renameDocument(doc.id, finalName);
+      showToast(`Renamed to ${finalName}`, 'success');
+      onRefresh();
     } catch (err) {
       logger.error('SavedDocsView', 'Rename error', err);
       showToast('Failed to rename document', 'error');

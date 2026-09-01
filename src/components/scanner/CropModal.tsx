@@ -18,6 +18,7 @@ import {
   rotateQuad,
   getQuadMidpoints,
   clampPoint,
+  rotateImageCanvas,
   disposeCanvas,
 } from '../../utils/geometry';
 import { triggerHaptic } from '../../utils/formatters';
@@ -48,6 +49,7 @@ export const CropModal: React.FC<CropModalProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [rotatedSrc, setRotatedSrc] = useState<string | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [displaySize, setDisplaySize] = useState<{ width: number; height: number; left: number; top: number }>({
     width: 0,
@@ -56,6 +58,8 @@ export const CropModal: React.FC<CropModalProps> = ({
     top: 0,
   });
 
+  const currentSrc = rotatedSrc || imageSrc;
+
   const [corners, setCorners] = useState<CornerQuad | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const [dragClientPos, setDragClientPos] = useState<{ x: number; y: number } | null>(null);
@@ -63,7 +67,6 @@ export const CropModal: React.FC<CropModalProps> = ({
   const [autoLight, setAutoLight] = useState(true);
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
-  const [rotationAngle, setRotationAngle] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showLightingControls, setShowLightingControls] = useState(false);
 
@@ -75,7 +78,7 @@ export const CropModal: React.FC<CropModalProps> = ({
     loadImageElement(imageSrc)
       .then((img) => {
         if (!isMounted) return;
-        setRotationAngle(0);
+        setRotatedSrc(null);
         const w = img.naturalWidth;
         const h = img.naturalHeight;
         setNaturalSize({ width: w, height: h });
@@ -120,7 +123,7 @@ export const CropModal: React.FC<CropModalProps> = ({
     updateBounds();
     window.addEventListener('resize', updateBounds);
     return () => window.removeEventListener('resize', updateBounds);
-  }, [naturalSize, rotationAngle, updateBounds]);
+  }, [naturalSize, currentSrc, updateBounds]);
 
   // Update Magnifying Loupe Canvas on Drag
   useEffect(() => {
@@ -283,11 +286,11 @@ export const CropModal: React.FC<CropModalProps> = ({
     }
   };
 
-  const handleAutoDetect = () => {
+  const handleAutoDetect = async () => {
     triggerHaptic(25);
-    if (!imageSrc || !naturalSize.width) return;
-    const img = new Image();
-    img.onload = () => {
+    if (!currentSrc || !naturalSize.width) return;
+    try {
+      const img = await loadImageElement(currentSrc);
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -299,8 +302,9 @@ export const CropModal: React.FC<CropModalProps> = ({
       }
       disposeCanvas(canvas);
       showToast('Document boundary auto-detected', 'success');
-    };
-    img.src = imageSrc;
+    } catch (err) {
+      logger.error('CropModal', 'Auto detect error', err);
+    }
   };
 
   const handleResetFull = () => {
@@ -310,23 +314,32 @@ export const CropModal: React.FC<CropModalProps> = ({
     showToast('Reset to full frame', 'info');
   };
 
-  const handleRotate = () => {
+  const handleRotate = async () => {
     triggerHaptic(25);
-    if (!corners || !naturalSize.width) return;
-    // Rotate quad points by 90 deg clockwise
-    const nextQuad = rotateQuad(corners, 90, naturalSize.width, naturalSize.height);
-    setCorners(nextQuad);
-    setNaturalSize({ width: naturalSize.height, height: naturalSize.width });
-    setRotationAngle((prev) => (prev + 90) % 360);
+    if (!corners || !currentSrc || !naturalSize.width) return;
+
+    try {
+      const img = await loadImageElement(currentSrc);
+      const rotatedCanvas = rotateImageCanvas(img, 90);
+      const rotatedDataUrl = rotatedCanvas.toDataURL('image/jpeg', 0.94);
+      disposeCanvas(rotatedCanvas);
+
+      const nextQuad = rotateQuad(corners, 90, naturalSize.width, naturalSize.height);
+      setCorners(nextQuad);
+      setNaturalSize({ width: naturalSize.height, height: naturalSize.width });
+      setRotatedSrc(rotatedDataUrl);
+    } catch (err) {
+      logger.error('CropModal', 'Error rotating image in crop modal', err);
+    }
   };
 
   const handleConfirm = async () => {
-    if (!imageSrc || !corners) return;
+    if (!currentSrc || !corners) return;
     setIsProcessing(true);
     triggerHaptic(30);
 
     try {
-      const img = await loadImageElement(imageSrc);
+      const img = await loadImageElement(currentSrc);
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -338,47 +351,19 @@ export const CropModal: React.FC<CropModalProps> = ({
       // 1. Perspective Transform Auto-Cut
       const croppedCanvas = warpPerspectiveCrop(canvas, corners);
 
-      // 2. Handle Rotation if applied
-      let finalCanvas = croppedCanvas;
-      if (rotationAngle !== 0) {
-        const rotCanvas = document.createElement('canvas');
-        const rotCtx = rotCanvas.getContext('2d');
-        if (rotationAngle === 90 || rotationAngle === 270) {
-          rotCanvas.width = croppedCanvas.height;
-          rotCanvas.height = croppedCanvas.width;
-        } else {
-          rotCanvas.width = croppedCanvas.width;
-          rotCanvas.height = croppedCanvas.height;
-        }
-
-        if (rotCtx) {
-          rotCtx.translate(rotCanvas.width / 2, rotCanvas.height / 2);
-          rotCtx.rotate((rotationAngle * Math.PI) / 180);
-          rotCtx.drawImage(croppedCanvas, -croppedCanvas.width / 2, -croppedCanvas.height / 2);
-          finalCanvas = rotCanvas;
-        }
-      }
-
-      // 3. Apply Document Filters & Auto Light Shadow Removal
-      const processedUrl = await applyImageFilter(finalCanvas, {
+      // 2. Apply Document Filters & Auto Light Shadow Removal
+      const processedUrl = await applyImageFilter(croppedCanvas, {
         filter: activeFilter,
         autoLight,
         brightness,
         contrast,
       });
 
-      const croppedOriginalUrl = finalCanvas.toDataURL('image/jpeg', 0.94);
-
       // Clean memory safely
       disposeCanvas(canvas);
-      if (finalCanvas !== canvas) {
-        disposeCanvas(finalCanvas);
-      }
-      if (croppedCanvas !== canvas && croppedCanvas !== finalCanvas) {
-        disposeCanvas(croppedCanvas);
-      }
+      disposeCanvas(croppedCanvas);
 
-      onApplyCrop(processedUrl, croppedOriginalUrl, activeFilter);
+      onApplyCrop(processedUrl, currentSrc, activeFilter);
       onClose();
     } catch (err) {
       logger.error('CropModal', 'Error applying crop & filter', err);
@@ -443,11 +428,10 @@ export const CropModal: React.FC<CropModalProps> = ({
         <div className="relative max-w-full max-h-[48vh] sm:max-h-[58vh] inline-block">
           <img
             ref={imageRef}
-            src={imageSrc}
+            src={currentSrc || undefined}
             alt="Source scan"
             onLoad={updateBounds}
-            style={{ transform: `rotate(${rotationAngle}deg)` }}
-            className="max-w-full max-h-[48vh] sm:max-h-[58vh] object-contain rounded-xl shadow-2xl transition-transform duration-200"
+            className="max-w-full max-h-[48vh] sm:max-h-[58vh] object-contain rounded-xl shadow-2xl transition-all duration-200"
           />
 
           {/* Draggable 4-Corner Overlay */}

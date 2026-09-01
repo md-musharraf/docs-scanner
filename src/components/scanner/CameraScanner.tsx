@@ -113,11 +113,13 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         currentStream.getTracks().forEach((track) => track.stop());
       }
       setStream(null);
+      setTorchOn(false);
     };
   }, [facingMode]);
 
   const toggleCameraFacing = () => {
     triggerHaptic(20);
+    setTorchOn(false);
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
@@ -145,7 +147,11 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
   };
 
   const handleCapture = async () => {
-    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0 || video.readyState < 2) {
+      showToast('Camera feed is loading, please wait', 'info');
+      return;
+    }
     setIsCapturing(true);
     triggerHaptic(40);
 
@@ -154,10 +160,9 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     setTimeout(() => setShowShutterFlash(false), 120);
 
     try {
-      const video = videoRef.current;
       const canvas = document.createElement('canvas');
-      const w = video.videoWidth || 1920;
-      const h = video.videoHeight || 1080;
+      const w = video.videoWidth;
+      const h = video.videoHeight;
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext('2d');
@@ -286,13 +291,20 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
     if (!page) return;
 
     try {
-      const img = await loadImageElement(page.processedDataUrl);
-      const canvas = rotateImageCanvas(img, 90);
-      const newUrl = canvas.toDataURL('image/jpeg', 0.94);
-      disposeCanvas(canvas);
+      const imgProc = await loadImageElement(page.processedDataUrl);
+      const canvasProc = rotateImageCanvas(imgProc, 90);
+      const newProcUrl = canvasProc.toDataURL('image/jpeg', 0.94);
+      disposeCanvas(canvasProc);
+
+      const imgOrig = await loadImageElement(page.originalDataUrl);
+      const canvasOrig = rotateImageCanvas(imgOrig, 90);
+      const newOrigUrl = canvasOrig.toDataURL('image/jpeg', 0.94);
+      disposeCanvas(canvasOrig);
 
       setPages((prev) =>
-        prev.map((p, i) => (i === idx ? { ...p, processedDataUrl: newUrl } : p))
+        prev.map((p, i) =>
+          i === idx ? { ...p, processedDataUrl: newProcUrl, originalDataUrl: newOrigUrl } : p
+        )
       );
       showToast(`Page ${idx + 1} rotated`, 'info');
     } catch (err) {

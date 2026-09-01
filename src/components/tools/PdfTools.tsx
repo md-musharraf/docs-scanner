@@ -83,24 +83,62 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
         const pagesToRemove: number[] = [];
         const parts = removePagesInput.split(',');
         for (const p of parts) {
-          const num = parseInt(p.trim(), 10);
-          if (!isNaN(num) && num >= 1 && num <= pageCount) {
-            pagesToRemove.push(num - 1);
+          const trimmed = p.trim();
+          if (trimmed.includes('-')) {
+            const [startStr, endStr] = trimmed.split('-');
+            const start = parseInt(startStr, 10);
+            const end = parseInt(endStr, 10);
+            if (!isNaN(start) && !isNaN(end)) {
+              for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
+                if (i >= 1 && i <= pageCount) pagesToRemove.push(i - 1);
+              }
+            }
+          } else {
+            const num = parseInt(trimmed, 10);
+            if (!isNaN(num) && num >= 1 && num <= pageCount) {
+              pagesToRemove.push(num - 1);
+            }
           }
         }
-        if (pagesToRemove.length === 0) {
+        // Deduplicate
+        const uniquePages = [...new Set(pagesToRemove)];
+        if (uniquePages.length === 0) {
           showToast('Please enter valid page numbers to delete', 'error');
           setIsProcessing(false);
           return;
         }
-        outputBytes = await removePagesFromPDF(buffer, pagesToRemove);
+        outputBytes = await removePagesFromPDF(buffer, uniquePages);
         outputName = ensurePdfExtension(`${baseName}_trimmed`);
+      }
+
+      // Calculate correct page count for the output document
+      let outputPageCount = pageCount;
+      if (activeSubTool === 'remove') {
+        const parts2 = removePagesInput.split(',');
+        const removedSet = new Set<number>();
+        for (const p of parts2) {
+          const trimmed = p.trim();
+          if (trimmed.includes('-')) {
+            const [s, e] = trimmed.split('-');
+            const start = parseInt(s, 10);
+            const end = parseInt(e, 10);
+            if (!isNaN(start) && !isNaN(end)) {
+              for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
+                if (i >= 1 && i <= pageCount) removedSet.add(i);
+              }
+            }
+          } else {
+            const num = parseInt(trimmed, 10);
+            if (!isNaN(num) && num >= 1 && num <= pageCount) removedSet.add(num);
+          }
+        }
+        outputPageCount = Math.max(1, pageCount - removedSet.size);
       }
 
       await saveDocumentLocally({
         name: outputName,
         sizeBytes: outputBytes.byteLength,
-        pageCount: pageCount,
+        pageCount: outputPageCount,
         thumbnailUrl: '',
         data: outputBytes,
       });

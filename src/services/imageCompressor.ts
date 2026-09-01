@@ -125,6 +125,7 @@ export async function compressImageToTargetKB(
   // If still exceeding targetBytes (even at lowest quality), downscale dimensions further
   if (!bestBlob || bestBlob.size > targetBytes) {
     let scaleFactor = 0.85;
+    const testQuality = bestBlob ? Math.max(0.1, bestQuality) : Math.max(0.1, minQ);
     for (let iter = 0; iter < 5; iter++) {
       currentWidth = Math.max(80, Math.round(currentWidth * scaleFactor));
       currentHeight = Math.max(80, Math.round(currentHeight * scaleFactor));
@@ -134,7 +135,7 @@ export async function compressImageToTargetKB(
       ctx.fillRect(0, 0, currentWidth, currentHeight);
       ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
 
-      const blob = await getBlob(Math.max(0.1, bestQuality));
+      const blob = await getBlob(testQuality);
       bestBlob = blob;
       if (blob.size <= targetBytes) {
         break;
@@ -149,10 +150,10 @@ export async function compressImageToTargetKB(
   canvas.width = 0;
   canvas.height = 0;
 
-  const reductionPercentage = Math.max(
-    0,
-    Math.round(((originalSizeBytes - finalBlob.size) / originalSizeBytes) * 100)
-  );
+  const reductionPercentage =
+    originalSizeBytes > 0
+      ? Math.max(0, Math.round(((originalSizeBytes - finalBlob.size) / originalSizeBytes) * 100))
+      : 0;
 
   logger.timeEnd('Compressor', 'TargetSizeCompress');
 
@@ -269,10 +270,10 @@ export async function resizeAndCompressImage(
   canvas.width = 0;
   canvas.height = 0;
 
-  const reductionPercentage = Math.max(
-    0,
-    Math.round(((originalSizeBytes - blob.size) / originalSizeBytes) * 100)
-  );
+  const reductionPercentage =
+    originalSizeBytes > 0
+      ? Math.max(0, Math.round(((originalSizeBytes - blob.size) / originalSizeBytes) * 100))
+      : 0;
 
   return {
     blob,
