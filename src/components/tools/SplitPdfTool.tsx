@@ -76,6 +76,28 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
     setSelectedPages([]);
   };
 
+  const selectEvenPages = () => {
+    triggerHaptic(20);
+    const evens = renderedPages.map((p) => p.pageNumber).filter((num) => num % 2 === 0);
+    setSelectedPages(evens);
+    showToast(`Selected ${evens.length} even pages`, 'info');
+  };
+
+  const selectOddPages = () => {
+    triggerHaptic(20);
+    const odds = renderedPages.map((p) => p.pageNumber).filter((num) => num % 2 !== 0);
+    setSelectedPages(odds);
+    showToast(`Selected ${odds.length} odd pages`, 'info');
+  };
+
+  const invertSelection = () => {
+    triggerHaptic(20);
+    const allNums = renderedPages.map((p) => p.pageNumber);
+    const inverted = allNums.filter((num) => !selectedPages.includes(num));
+    setSelectedPages(inverted);
+    showToast(`Inverted to ${inverted.length} pages`, 'info');
+  };
+
   const applyRangeInput = () => {
     triggerHaptic(25);
     if (!rangeInput.trim()) return;
@@ -212,20 +234,41 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
             </div>
 
             {/* Quick Select Buttons */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={selectAll}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[36px]"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[34px]"
               >
-                Select All
+                All
+              </button>
+              <button
+                type="button"
+                onClick={selectOddPages}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[34px]"
+              >
+                Odd Pages
+              </button>
+              <button
+                type="button"
+                onClick={selectEvenPages}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[34px]"
+              >
+                Even Pages
+              </button>
+              <button
+                type="button"
+                onClick={invertSelection}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[34px]"
+              >
+                Invert
               </button>
               <button
                 type="button"
                 onClick={deselectAll}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[36px]"
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-xs font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors min-h-[34px]"
               >
-                Deselect All
+                Clear
               </button>
               <button
                 type="button"
@@ -235,7 +278,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
                   setRenderedPages([]);
                   setSelectedPages([]);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-400 cursor-pointer transition-colors min-h-[36px]"
+                className="px-2.5 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-400 cursor-pointer transition-colors min-h-[34px]"
               >
                 Change PDF
               </button>
@@ -257,7 +300,7 @@ export const SplitPdfTool: React.FC<SplitPdfToolProps> = ({ onDocumentSaved }) =
               onClick={applyRangeInput}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors min-h-[32px]"
             >
-              Apply
+              Apply Range
             </button>
           </div>
 

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import {
+  LayoutGrid,
   Camera,
   Layers,
   Scissors,
@@ -12,6 +13,7 @@ import {
 import { triggerHaptic } from '../../utils/formatters';
 
 export type ActiveTab =
+  | 'hub'
   | 'scan'
   | 'resize'
   | 'merge'
@@ -35,6 +37,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const mobileNavRef = useRef<HTMLDivElement>(null);
 
   const tabs = [
+    { id: 'hub' as ActiveTab, label: 'All Tools', icon: LayoutGrid },
     { id: 'scan' as ActiveTab, label: 'Scanner', icon: Camera, highlight: true },
     { id: 'resize' as ActiveTab, label: 'Compress / Resize', icon: Minimize2 },
     { id: 'merge' as ActiveTab, label: 'Merge PDF', icon: Layers },

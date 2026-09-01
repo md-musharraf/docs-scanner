@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, ArrowUp, ArrowDown, Trash2 } from 'lucide-react';
+import { Layers, ArrowUp, ArrowDown, Trash2, ArrowUpDown } from 'lucide-react';
 import { FileDropzone } from '../common/FileDropzone';
 import { ToolHeader } from '../common/ToolHeader';
 import { ActionButton } from '../common/ActionButton';
@@ -84,6 +84,12 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
     setFiles((prev) => moveArrayItem(prev, index, targetIndex));
   };
 
+  const handleReverseOrder = () => {
+    triggerHaptic(20);
+    setFiles((prev) => [...prev].reverse());
+    showToast('Reversed file order', 'info');
+  };
+
   const removeFile = (id: string) => {
     triggerHaptic(20);
     setFiles((prev) => prev.filter((f) => f.id !== id));
@@ -156,22 +162,35 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
               <h3 className="text-sm font-bold text-white">
                 Selected Documents ({files.length})
               </h3>
-              <p className="text-xs text-slate-400">Total {totalPageCount} pages combined</p>
+              <p className="text-xs text-slate-400">
+                {totalPageCount} pages total • {formatFileSize(files.reduce((sum, f) => sum + f.size, 0))}
+              </p>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleReverseOrder}
+                className="flex items-center space-x-1 text-xs text-slate-300 hover:text-white font-semibold px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 cursor-pointer transition-colors min-h-[36px]"
+                title="Reverse document order"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5 text-blue-400" />
+                <span>Reverse Order</span>
+              </button>
+
               <DocNameInput
                 value={mergedFilename}
                 onChange={setMergedFilename}
                 placeholder="Merged Document"
               />
+
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic(20);
                   setFiles([]);
                 }}
-                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
+                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors min-h-[36px]"
               >
                 Clear All
               </button>

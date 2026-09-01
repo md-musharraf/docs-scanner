@@ -1,5 +1,17 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { X, Download, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Share2 } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  X,
+  Download,
+  ZoomIn,
+  ZoomOut,
+  ChevronLeft,
+  ChevronRight,
+  Share2,
+  Printer,
+  Maximize,
+  Minimize,
+  RotateCw,
+} from 'lucide-react';
 import { renderPdfPage, getPdfPageCount } from '../../lib/pdfRenderer';
 import { downloadFile, shareDocument } from '../../lib/storage';
 import { triggerHaptic } from '../../utils/formatters';
@@ -20,42 +32,83 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   onClose,
 }) => {
   const { showToast } = useToast();
+  const modalRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
   const [scale, setScale] = useState(1.4);
   const [pageImage, setPageImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [rotationAngle, setRotationAngle] = useState(0);
 
-  const renderPage = useCallback(async (data: Uint8Array, page: number, currentScale: number) => {
-    setIsLoading(true);
-    try {
-      const rendered = await renderPdfPage(data, page, currentScale);
-      setPageImage(rendered.dataUrl);
-    } catch (err) {
-      logger.error('PdfViewer', 'Error rendering page', err);
-      showToast('Error rendering PDF page', 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [showToast]);
+  const renderPage = useCallback(
+    async (data: Uint8Array, page: number, currentScale: number) => {
+      setIsLoading(true);
+      try {
+        const rendered = await renderPdfPage(data, page, currentScale);
+        setPageImage(rendered.dataUrl);
+      } catch (err) {
+        logger.error('PdfViewer', 'Error rendering page', err);
+        showToast('Error rendering PDF page', 'error');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [showToast]
+  );
+
+  const goToPage = useCallback(
+    (page: number) => {
+      if (!pdfData) return;
+      const targetPage = Math.max(1, Math.min(totalPages, page));
+      triggerHaptic(20);
+      setCurrentPage(targetPage);
+      setPageInput(targetPage.toString());
+      renderPage(pdfData, targetPage, scale);
+    },
+    [pdfData, totalPages, scale, renderPage]
+  );
 
   const handlePrevPage = useCallback(() => {
-    if (currentPage > 1 && pdfData) {
-      triggerHaptic(20);
-      const newPage = currentPage - 1;
-      setCurrentPage(newPage);
-      renderPage(pdfData, newPage, scale);
+    if (currentPage > 1) {
+      goToPage(currentPage - 1);
     }
-  }, [currentPage, pdfData, renderPage, scale]);
+  }, [currentPage, goToPage]);
 
   const handleNextPage = useCallback(() => {
-    if (currentPage < totalPages && pdfData) {
-      triggerHaptic(20);
-      const newPage = currentPage + 1;
-      setCurrentPage(newPage);
-      renderPage(pdfData, newPage, scale);
+    if (currentPage < totalPages) {
+      goToPage(currentPage + 1);
     }
-  }, [currentPage, totalPages, pdfData, renderPage, scale]);
+  }, [currentPage, totalPages, goToPage]);
+
+  const handlePageInputSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseInt(pageInput, 10);
+    if (!isNaN(parsed)) {
+      goToPage(parsed);
+    } else {
+      setPageInput(currentPage.toString());
+    }
+  };
+
+  const handleZoomIn = useCallback(() => {
+    if (pdfData) {
+      triggerHaptic(20);
+      const newScale = Math.min(Number((scale + 0.25).toFixed(2)), 3.0);
+      setScale(newScale);
+      renderPage(pdfData, currentPage, newScale);
+    }
+  }, [pdfData, scale, currentPage, renderPage]);
+
+  const handleZoomOut = useCallback(() => {
+    if (pdfData) {
+      triggerHaptic(20);
+      const newScale = Math.max(Number((scale - 0.25).toFixed(2)), 0.6);
+      setScale(newScale);
+      renderPage(pdfData, currentPage, newScale);
+    }
+  }, [pdfData, scale, currentPage, renderPage]);
 
   useEffect(() => {
     if (!isOpen || !pdfData) {
@@ -68,7 +121,9 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         if (!isMounted) return;
         setTotalPages(count);
         setCurrentPage(1);
+        setPageInput('1');
         setScale(1.4);
+        setRotationAngle(0);
         const rendered = await renderPdfPage(pdfData, 1, 1.4);
         if (isMounted) {
           setPageImage(rendered.dataUrl);
@@ -93,27 +148,19 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       if (e.key === 'Escape') onClose();
       if (e.key === 'ArrowLeft') handlePrevPage();
       if (e.key === 'ArrowRight') handleNextPage();
+      if (e.key === '=' || e.key === '+') handleZoomIn();
+      if (e.key === '-' || e.key === '_') handleZoomOut();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose, handlePrevPage, handleNextPage]);
+  }, [isOpen, onClose, handlePrevPage, handleNextPage, handleZoomIn, handleZoomOut]);
 
-  const handleZoomIn = () => {
+  const handleSetExactScale = (newScale: number) => {
     if (pdfData) {
       triggerHaptic(20);
-      const newScale = Math.min(scale + 0.3, 3.0);
-      setScale(newScale);
-      renderPage(pdfData, currentPage, newScale);
-    }
-  };
-
-  const handleZoomOut = () => {
-    if (pdfData) {
-      triggerHaptic(20);
-      const newScale = Math.max(scale - 0.3, 0.6);
       setScale(newScale);
       renderPage(pdfData, currentPage, newScale);
     }
@@ -136,64 +183,154 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     }
   };
 
+  const handlePrint = () => {
+    if (!pdfData) return;
+    triggerHaptic(20);
+    try {
+      const blob = new Blob([pdfData as any], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(url);
+        }, 60000);
+      };
+    } catch (err) {
+      logger.error('PdfViewer', 'Print error', err);
+      showToast('Printing not supported on this device', 'info');
+    }
+  };
+
+  const toggleFullscreen = () => {
+    triggerHaptic(20);
+    if (!document.fullscreenElement) {
+      modalRef.current?.requestFullscreen?.().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
+
+  const handleRotateView = () => {
+    triggerHaptic(20);
+    setRotationAngle((prev) => (prev + 90) % 360);
+  };
+
   if (!isOpen || !pdfData) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-200">
+    <div
+      ref={modalRef}
+      className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-2xl animate-in fade-in duration-200 h-[100dvh] overflow-hidden"
+    >
       {/* Top Action Bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/80 pt-[max(env(safe-area-inset-top),12px)]">
-        <div className="flex items-center space-x-3 truncate">
+      <div className="flex items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 border-b border-slate-800 bg-slate-900/90 pt-[max(env(safe-area-inset-top),10px)] flex-shrink-0">
+        <div className="flex items-center space-x-2.5 min-w-0">
           <button
             type="button"
             onClick={() => {
               triggerHaptic(20);
               onClose();
             }}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center flex-shrink-0"
+            title="Close Preview (Esc)"
           >
             <X className="w-5 h-5" />
           </button>
-          <div className="truncate">
-            <h3 className="text-sm font-bold text-white truncate max-w-[180px] sm:max-w-md">
+
+          <div className="min-w-0">
+            <h3
+              className="text-xs sm:text-sm font-bold text-white truncate max-w-[160px] xs:max-w-[220px] sm:max-w-md"
+              title={filename}
+            >
               {filename}
             </h3>
-            <p className="text-xs text-slate-400">
-              Page {currentPage} of {totalPages}
-            </p>
+            <div className="flex items-center space-x-2 text-[11px] text-slate-400">
+              <span>{totalPages} {totalPages === 1 ? 'page' : 'pages'}</span>
+              <span>•</span>
+              <span className="text-blue-400 font-mono font-semibold">{Math.round(scale * 100)}%</span>
+            </div>
           </div>
         </div>
 
-        {/* Controls */}
-        <div className="flex items-center space-x-1 sm:space-x-2">
+        {/* Top Controls Toolbar */}
+        <div className="flex items-center space-x-1 sm:space-x-1.5 flex-shrink-0">
           {/* Zoom controls */}
-          <div className="hidden sm:flex items-center space-x-1 bg-slate-800/80 rounded-xl p-1 border border-slate-700">
+          <div className="hidden sm:flex items-center space-x-0.5 bg-slate-950/80 rounded-xl p-1 border border-slate-800">
             <button
               type="button"
               onClick={handleZoomOut}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
-              title="Zoom Out"
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-850 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
+              title="Zoom Out (-)"
             >
               <ZoomOut className="w-4 h-4" />
             </button>
-            <span className="text-xs px-1 text-slate-300 font-mono">
+            <button
+              type="button"
+              onClick={() => handleSetExactScale(1.0)}
+              className="text-[11px] px-2 py-0.5 text-slate-300 font-mono hover:text-white rounded hover:bg-slate-800 cursor-pointer"
+              title="Reset 100%"
+            >
               {Math.round(scale * 100)}%
-            </span>
+            </button>
             <button
               type="button"
               onClick={handleZoomIn}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
-              title="Zoom In"
+              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-850 cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
+              title="Zoom In (+)"
             >
               <ZoomIn className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Share on mobile */}
+          {/* Quick Rotate view */}
+          <button
+            type="button"
+            onClick={handleRotateView}
+            className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
+            title="Rotate View 90°"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
+
+          {/* Print button on desktop */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="hidden xs:flex p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer min-w-[36px] min-h-[36px] items-center justify-center"
+            title="Print PDF"
+          >
+            <Printer className="w-4 h-4" />
+          </button>
+
+          {/* Fullscreen toggle */}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="hidden sm:flex p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer min-w-[36px] min-h-[36px] items-center justify-center"
+            title="Toggle Fullscreen"
+          >
+            {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+          </button>
+
+          {/* Share */}
           <button
             type="button"
             onClick={handleShare}
-            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors cursor-pointer min-w-[40px] min-h-[40px] flex items-center justify-center"
-            title="Share PDF"
+            className="p-2 rounded-xl bg-slate-950/80 border border-slate-800 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
+            title="Share Document"
           >
             <Share2 className="w-4 h-4" />
           </button>
@@ -202,60 +339,74 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
           <button
             type="button"
             onClick={handleDownload}
-            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/30 transition-all active:scale-95 cursor-pointer min-h-[40px]"
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 active:scale-95 transition-all cursor-pointer min-h-[36px]"
           >
             <Download className="w-4 h-4" />
-            <span className="hidden xs:inline">Save</span>
+            <span className="hidden xs:inline">Save PDF</span>
           </button>
         </div>
       </div>
 
       {/* Main Canvas Viewer */}
-      <div className="flex-1 overflow-auto p-4 flex items-center justify-center relative select-none">
+      <div className="flex-1 overflow-auto p-2 sm:p-4 flex items-center justify-center relative select-none touch-pan-x touch-pan-y">
         {isLoading ? (
           <div className="flex flex-col items-center space-y-3">
             <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-            <p className="text-sm text-slate-400">Rendering page {currentPage}...</p>
+            <p className="text-xs sm:text-sm text-slate-400 font-medium">
+              Rendering page {currentPage} of {totalPages}...
+            </p>
           </div>
         ) : pageImage ? (
-          <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white">
+          <div
+            className="relative shadow-2xl rounded-xl overflow-hidden border border-slate-800 bg-white transition-transform duration-200 inline-block"
+            style={{ transform: `rotate(${rotationAngle}deg)` }}
+          >
             <img
               src={pageImage}
               alt={`Page ${currentPage}`}
-              className="max-w-full max-h-[75vh] object-contain select-none"
+              className="max-w-full max-h-[72vh] object-contain select-none block"
             />
           </div>
         ) : null}
       </div>
 
       {/* Bottom Paging Toolbar */}
-      {totalPages > 1 && (
-        <div className="p-3 border-t border-slate-800 bg-slate-900/90 flex items-center justify-center space-x-4 pb-[max(env(safe-area-inset-bottom),12px)]">
-          <button
-            type="button"
-            onClick={handlePrevPage}
-            disabled={currentPage <= 1}
-            className="flex items-center space-x-1 px-4 py-2 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-semibold transition-colors cursor-pointer min-h-[40px]"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Prev</span>
-          </button>
+      <div className="p-2.5 sm:p-3 border-t border-slate-800 bg-slate-900/95 backdrop-blur-md flex items-center justify-between sm:justify-center sm:space-x-6 pb-[max(env(safe-area-inset-bottom),10px)] flex-shrink-0">
+        <button
+          type="button"
+          onClick={handlePrevPage}
+          disabled={currentPage <= 1}
+          className="flex items-center space-x-1 px-3.5 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[36px]"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span>Prev</span>
+        </button>
 
-          <span className="text-sm font-bold text-slate-300">
-            {currentPage} / {totalPages}
-          </span>
+        {/* Direct Page Jump Form */}
+        <form onSubmit={handlePageInputSubmit} className="flex items-center space-x-1.5">
+          <span className="text-xs text-slate-400">Page</span>
+          <input
+            type="number"
+            min="1"
+            max={totalPages}
+            value={pageInput}
+            onChange={(e) => setPageInput(e.target.value)}
+            onBlur={handlePageInputSubmit}
+            className="w-14 bg-slate-950 border border-slate-800 text-center text-xs sm:text-sm font-bold text-white py-1 rounded-lg focus:outline-none focus:border-blue-500 font-mono min-h-[32px]"
+          />
+          <span className="text-xs text-slate-400 font-semibold">of {totalPages}</span>
+        </form>
 
-          <button
-            type="button"
-            onClick={handleNextPage}
-            disabled={currentPage >= totalPages}
-            className="flex items-center space-x-1 px-4 py-2 rounded-xl bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 text-white text-sm font-semibold transition-colors cursor-pointer min-h-[40px]"
-          >
-            <span>Next</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+        <button
+          type="button"
+          onClick={handleNextPage}
+          disabled={currentPage >= totalPages}
+          className="flex items-center space-x-1 px-3.5 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer min-h-[36px]"
+        >
+          <span>Next</span>
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 };

@@ -142,7 +142,8 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
     try {
       let result: CompressionResult;
       if (mode === 'target') {
-        result = await compressImageToTargetKB(item.file, targetKB, 'image/jpeg');
+        const targetFormat = format === 'image/webp' ? 'image/webp' : 'image/jpeg';
+        result = await compressImageToTargetKB(item.file, targetKB, targetFormat);
       } else if (mode === 'dimension') {
         result = await resizeAndCompressImage(item.file, {
           exactWidth: customWidth,
