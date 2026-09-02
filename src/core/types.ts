@@ -19,6 +19,7 @@ export interface ImageEnhanceOptions {
   contrast?: number;   // -100 to +100
   quality?: number;    // 0 to 1
   maxDimension?: number;
+  sauvolaSensitivity?: number; // 0.1 to 0.4
 }
 
 export interface ImageToPdfOptions {
@@ -36,12 +37,45 @@ export interface WatermarkOptions {
   angle?: number;
 }
 
+export type PageNumberPosition =
+  | 'bottom_center'
+  | 'bottom_right'
+  | 'bottom_left'
+  | 'top_center'
+  | 'top_right';
+
+export interface PageNumberOptions {
+  position: PageNumberPosition;
+  format: 'page_of_total' | 'page_only' | 'simple_slash';
+  prefix?: string;
+  fontSize?: number;
+  opacity?: number;
+  color?: { r: number; g: number; b: number };
+  startPage?: number;
+}
+
+export interface PdfMetadataOptions {
+  title?: string;
+  author?: string;
+  subject?: string;
+  keywords?: string[];
+  creator?: string;
+}
+
+export interface PdfCompressionOptions {
+  quality?: number; // 0.1 to 0.95
+  scale?: number;   // 0.5 to 1.5
+  targetKB?: number;
+}
+
 export interface RenderedPage {
   pageNumber: number;
   dataUrl: string;
   width: number;
   height: number;
 }
+
+export type DocumentCategory = 'scan' | 'compress' | 'merge' | 'split' | 'tools' | 'convert';
 
 export interface SavedDocumentMetadata {
   id: string;
@@ -50,6 +84,7 @@ export interface SavedDocumentMetadata {
   sizeBytes: number;
   pageCount: number;
   thumbnailUrl: string;
+  category?: DocumentCategory;
 }
 
 export interface SavedDocument extends SavedDocumentMetadata {
@@ -62,3 +97,4 @@ export interface ScannedPageItem {
   processedDataUrl: string;
   filter: ScannerFilter;
 }
+

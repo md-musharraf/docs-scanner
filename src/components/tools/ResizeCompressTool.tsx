@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   FileStack,
   Crop,
+  FileText,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { FileDropzone } from '../common/FileDropzone';
@@ -21,7 +22,9 @@ import {
 } from '../../services/imageCompressor';
 import type { CompressionResult } from '../../services/imageCompressor';
 import { downloadFile, saveDocumentLocally } from '../../lib/storage';
-import { imagesToPDF } from '../../lib/pdfEngine';
+import { imagesToPDF, compressPDFDocument } from '../../lib/pdfEngine';
+import { getPdfPageCount } from '../../lib/pdfRenderer';
+import { PdfViewerModal } from '../common/PdfViewerModal';
 import { formatFileSize, ensurePdfExtension, sanitizeFilename, triggerCelebration, triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
@@ -63,7 +66,7 @@ interface ResizeCompressToolProps {
 export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocumentSaved }) => {
   const { showToast } = useToast();
   const [images, setImages] = useState<ImageItem[]>([]);
-  const [mode, setMode] = useState<'target' | 'dimension' | 'manual'>('target');
+  const [mode, setMode] = useState<'target' | 'dimension' | 'manual' | 'pdf_compress'>('target');
 
   // Target KB State
   const [targetKB, setTargetKB] = useState<number>(100);
@@ -79,6 +82,16 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   const [quality, setQuality] = useState<number>(80);
   const [scalePercentage, setScalePercentage] = useState<number>(75);
   const [format, setFormat] = useState<'image/jpeg' | 'image/webp' | 'image/png'>('image/jpeg');
+
+  // PDF Document Compression State
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfBuffer, setPdfBuffer] = useState<ArrayBuffer | null>(null);
+  const [pdfPageCount, setPdfPageCount] = useState<number>(1);
+  const [pdfCompressionPreset, setPdfCompressionPreset] = useState<'aggressive' | 'balanced' | 'light'>('balanced');
+  const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [isCompressingPdf, setIsCompressingPdf] = useState(false);
+  const [compressedPdfBytes, setCompressedPdfBytes] = useState<Uint8Array | null>(null);
+  const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
 
   const [isProcessingAll, setIsProcessingAll] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
@@ -106,6 +119,27 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
   }, []);
 
   const handleFilesSelected = async (files: File[]) => {
+    if (mode === 'pdf_compress') {
+      const selectedPdf = files.find((f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+      if (!selectedPdf) {
+        showToast('Please select a valid PDF file', 'error');
+        return;
+      }
+      setPdfFile(selectedPdf);
+      setCompressedPdfBytes(null);
+      try {
+        const buf = await selectedPdf.arrayBuffer();
+        setPdfBuffer(buf);
+        const count = await getPdfPageCount(buf);
+        setPdfPageCount(count);
+        showToast(`Loaded ${selectedPdf.name} (${count} pages)`, 'success');
+      } catch (err) {
+        logger.error('ResizeCompressTool', 'Error reading PDF', err);
+        showToast('Error reading PDF file', 'error');
+      }
+      return;
+    }
+
     const imgFiles = files.filter((f) => f.type.startsWith('image/'));
     if (imgFiles.length === 0) {
       showToast('Please select valid image files (JPG, PNG, WebP)', 'error');
@@ -207,6 +241,61 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
     }
   };
 
+  // PDF Document Compression Handler
+  const handleCompressPdfDocument = async () => {
+    if (!pdfBuffer || !pdfFile) return;
+    setIsCompressingPdf(true);
+    triggerHaptic(25);
+
+    try {
+      let scale = 1.0;
+      let q = 0.80;
+
+      if (pdfCompressionPreset === 'aggressive') {
+        scale = 0.75;
+        q = 0.65;
+      } else if (pdfCompressionPreset === 'balanced') {
+        scale = 1.0;
+        q = 0.78;
+      } else {
+        // light
+        scale = 1.25;
+        q = 0.90;
+      }
+
+      const compressed = await compressPDFDocument(
+        pdfBuffer,
+        { scale, quality: q },
+        (current, total) => setPdfProgress({ current, total })
+      );
+
+      setCompressedPdfBytes(compressed);
+
+      const baseName = pdfFile.name.replace(/\.pdf$/i, '');
+      const outName = ensurePdfExtension(`${baseName}_compressed_${Math.round(compressed.byteLength / 1024)}kb`);
+
+      await saveDocumentLocally({
+        name: outName,
+        sizeBytes: compressed.byteLength,
+        pageCount: pdfPageCount,
+        thumbnailUrl: '',
+        category: 'compress',
+        data: compressed,
+      });
+
+      if (onDocumentSaved) onDocumentSaved();
+
+      showToast(`PDF compressed: ${formatFileSize(pdfFile.size)} ➔ ${formatFileSize(compressed.byteLength)}`, 'success');
+      triggerCelebration();
+      setIsPdfPreviewOpen(true);
+    } catch (err) {
+      logger.error('ResizeCompressTool', 'PDF Compression error', err);
+      showToast('Error compressing PDF document', 'error');
+    } finally {
+      setIsCompressingPdf(false);
+    }
+  };
+
   const handleDownloadSingle = async (item: ImageItem) => {
     if (!item.result) return;
     triggerHaptic(25);
@@ -270,6 +359,7 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
         sizeBytes: pdfBytes.byteLength,
         pageCount: compressed.length,
         thumbnailUrl: compressed[0].result!.dataUrl,
+        category: 'compress',
         data: pdfBytes,
       });
 
@@ -316,13 +406,13 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       <ToolHeader
         icon={Minimize2}
         title="Image Resizer & Target Compressor"
-        subtitle="Reduce photo file sizes (KB) or resize to exact passport, signature & ID dimensions"
+        subtitle="Reduce photo file sizes (KB), resize to passport/ID cards, or compress full PDF documents"
         badge="Batch Engine"
         badgeVariant="amber"
       />
 
       {/* Mode Switcher */}
-      <div className="grid grid-cols-3 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 shadow-md">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800 shadow-md">
         <button
           type="button"
           onClick={() => {
@@ -370,370 +460,531 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
           <Sliders className="w-3.5 h-3.5" />
           <span>Manual Scale</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic(20);
+            setMode('pdf_compress');
+          }}
+          className={`py-2 px-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center space-x-1.5 transition-all cursor-pointer min-h-[40px] ${
+            mode === 'pdf_compress'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span>Compress PDF</span>
+        </button>
       </div>
 
-      {/* Dropzone */}
-      <FileDropzone
-        onFilesSelected={handleFilesSelected}
-        accept="image/*"
-        multiple={true}
-        title="Add Photos to Resize / Compress"
-        subtitle="Select photos (JPG, PNG, WebP) from your gallery"
-        icon="image"
-      />
-
-      {images.length > 0 && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
-          {/* Controls Bar */}
-          <div className="space-y-4 border-b border-slate-800 pb-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-white">
-                Compression Settings ({images.length} photos)
-              </h3>
-              <button
-                type="button"
-                onClick={clearAllImages}
-                className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
-              >
-                Clear All
-              </button>
-            </div>
-
-            {/* Target Size Controls */}
-            {mode === 'target' && (
-              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-300">
-                    Choose Target Maximum File Size
-                  </label>
-                  <span className="text-xs font-bold text-amber-400">
-                    Target: ≤ {targetKB} KB
-                  </span>
+      {/* PDF Document Mode View */}
+      {mode === 'pdf_compress' ? (
+        <div className="space-y-5">
+          {!pdfFile ? (
+            <FileDropzone
+              onFilesSelected={handleFilesSelected}
+              accept="application/pdf"
+              multiple={false}
+              title="Select PDF to Compress"
+              subtitle="Downsample and optimize PDF pages to reduce file size offline"
+              icon="pdf"
+            />
+          ) : (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white truncate max-w-sm">
+                    {pdfFile.name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {pdfPageCount} {pdfPageCount === 1 ? 'page' : 'pages'} • Original Size: {formatFileSize(pdfFile.size)}
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(20);
+                    setPdfFile(null);
+                    setPdfBuffer(null);
+                    setCompressedPdfBytes(null);
+                  }}
+                  className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 cursor-pointer min-h-[36px]"
+                >
+                  Change PDF
+                </button>
+              </div>
 
-                {/* Preset Chips */}
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {TARGET_SIZE_PRESETS.map((kb) => (
+              {/* Compression Preset Selector */}
+              <div className="space-y-3 bg-slate-950/80 p-4 rounded-2xl border border-slate-800">
+                <label className="text-xs font-semibold text-slate-300">
+                  Select Compression Level
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { id: 'aggressive' as const, label: 'High Compression', desc: 'Max size reduction (Govt portals ≤ 200KB)' },
+                    { id: 'balanced' as const, label: 'Balanced (Recommended)', desc: 'Great quality & ~40-60% size reduction' },
+                    { id: 'light' as const, label: 'Light (Crisp HD)', desc: 'High DPI with minimal compression' },
+                  ].map((p) => (
                     <button
-                      key={kb}
+                      key={p.id}
                       type="button"
-                      onClick={() => handleTargetPresetClick(kb)}
-                      className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[36px] ${
-                        targetKB === kb
-                          ? 'bg-amber-600/30 border-amber-500 text-amber-300 shadow-sm'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      onClick={() => {
+                        triggerHaptic(20);
+                        setPdfCompressionPreset(p.id);
+                      }}
+                      className={`p-3 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between min-h-[72px] ${
+                        pdfCompressionPreset === p.id
+                          ? 'bg-amber-600/25 border-amber-500 text-white shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                       }`}
                     >
-                      {kb} KB
+                      <span className="text-xs font-bold text-slate-200">{p.label}</span>
+                      <span className="text-[10px] text-slate-400 mt-1">{p.desc}</span>
                     </button>
                   ))}
                 </div>
-
-                {/* Custom Input */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-xs text-slate-400">Custom Target:</span>
-                  <div className="flex items-center space-x-1.5">
-                    <input
-                      type="number"
-                      min="5"
-                      max="10000"
-                      value={customTargetInput}
-                      onChange={(e) => handleCustomTargetChange(e.target.value)}
-                      className="w-20 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-xl focus:outline-none focus:border-amber-500 min-h-[34px]"
-                    />
-                    <span className="text-xs font-bold text-slate-300">KB</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500">
-                    (e.g., 20 for govt forms, 50 for PAN/passport)
-                  </span>
-                </div>
               </div>
-            )}
 
-            {/* Exact Dimension Controls */}
-            {mode === 'dimension' && (
-              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 mb-2 block">
-                    Choose Dimension Preset (Forms / Documents)
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                    {DIMENSION_PRESETS.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => handleDimPresetClick(p)}
-                        className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between min-h-[72px] ${
-                          activeDimPreset === p.id && customWidth === p.w && customHeight === p.h
-                            ? 'bg-amber-600/25 border-amber-500 text-white shadow-sm'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <span className="text-xs font-bold truncate">{p.label}</span>
-                        <span className="text-[10px] text-amber-400 mt-1">{p.w}×{p.h} px</span>
-                        <span className="text-[9px] text-slate-500">{p.desc}</span>
-                      </button>
-                    ))}
-                  </div>
+              {/* Progress Indicator */}
+              {isCompressingPdf && (
+                <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 text-center space-y-2">
+                  <div className="w-8 h-8 border-3 border-amber-500/20 border-t-amber-500 rounded-full animate-spin mx-auto"></div>
+                  <p className="text-xs text-slate-300 font-semibold">
+                    Compressing page {pdfProgress.current} of {pdfProgress.total}...
+                  </p>
                 </div>
+              )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-400">Width (Pixels):</span>
-                    <input
-                      type="number"
-                      min="20"
-                      max="4000"
-                      value={customWidth}
-                      onChange={(e) => setCustomWidth(parseInt(e.target.value, 10) || 100)}
-                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
-                    />
+              {/* Compressed Results Bar */}
+              {compressedPdfBytes && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl">
+                  <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    <span>
+                      Reduced: {formatFileSize(pdfFile.size)} ➔ {formatFileSize(compressedPdfBytes.byteLength)} (
+                      {Math.max(0, Math.round(((pdfFile.size - compressedPdfBytes.byteLength) / pdfFile.size) * 100))}
+                      % Saved)
+                    </span>
                   </div>
 
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-400">Height (Pixels):</span>
-                    <input
-                      type="number"
-                      min="20"
-                      max="4000"
-                      value={customHeight}
-                      onChange={(e) => setCustomHeight(parseInt(e.target.value, 10) || 100)}
-                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <span className="text-xs text-slate-400">Fit Strategy:</span>
-                    <select
-                      value={fitMode}
-                      onChange={(e) => setFitMode(e.target.value as any)}
-                      className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs p-2 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer"
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPdfPreviewOpen(true)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer min-h-[36px] flex items-center space-x-1"
                     >
-                      <option value="cover">Crop / Fill (No Distortion)</option>
-                      <option value="contain">Fit with White Margins</option>
-                      <option value="stretch">Stretch to Fit Exact</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Manual Resize Controls */}
-            {mode === 'manual' && (
-              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>Quality</span>
-                    <span className="text-amber-400 font-bold">{quality}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="5"
-                    max="100"
-                    value={quality}
-                    onChange={(e) => setQuality(parseInt(e.target.value, 10))}
-                    className="w-full accent-amber-500 cursor-pointer"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>Scale Resolution</span>
-                    <span className="text-amber-400 font-bold">{scalePercentage}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="15"
-                    max="100"
-                    step="5"
-                    value={scalePercentage}
-                    onChange={(e) => setScalePercentage(parseInt(e.target.value, 10))}
-                    className="w-full accent-amber-500 cursor-pointer"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400">Output Format</label>
-                  <select
-                    value={format}
-                    onChange={(e) => setFormat(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-amber-500 cursor-pointer"
-                  >
-                    <option value="image/jpeg">JPG (Standard photo)</option>
-                    <option value="image/webp">WebP (Modern & Smallest)</option>
-                    <option value="image/png">PNG (Lossless)</option>
-                  </select>
-                </div>
-              </div>
-            )}
-
-            {/* Action Compress Button */}
-            <ActionButton
-              onClick={handleCompressAll}
-              isLoading={isProcessingAll}
-              loadingText={`Processing ${images.length} Images...`}
-              icon={Sparkles}
-              variant="amber"
-              size="lg"
-              fullWidth
-            >
-              {hasAnyResults
-                ? 'Re-Process All Images'
-                : mode === 'target'
-                ? `Compress All to ≤ ${targetKB} KB`
-                : mode === 'dimension'
-                ? `Resize All to ${customWidth}×${customHeight} px`
-                : `Apply Custom Scale & Quality`}
-            </ActionButton>
-          </div>
-
-          {/* Stats Bar */}
-          {hasAnyResults && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl">
-              <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                <span className="break-all">
-                  Reduced: {formatFileSize(totalOriginalBytes)} ➔{' '}
-                  {formatFileSize(totalCompressedBytes)} (
-                  {totalOriginalBytes > 0
-                    ? Math.round(
-                        ((totalOriginalBytes - totalCompressedBytes) / totalOriginalBytes) * 100
-                      )
-                    : 0}
-                  % Saved)
-                </span>
-              </div>
-
-              {/* Batch Export Options */}
-              <div className="flex items-center space-x-2 w-full sm:w-auto">
-                <ActionButton
-                  onClick={handleDownloadZip}
-                  isLoading={isZipping}
-                  loadingText="Zipping..."
-                  icon={Archive}
-                  variant="secondary"
-                  size="sm"
-                  className="flex-1 sm:flex-initial"
-                >
-                  Download ZIP
-                </ActionButton>
-
-                <ActionButton
-                  onClick={handleSaveToPdf}
-                  isLoading={isPdfExporting}
-                  loadingText="Saving..."
-                  icon={FileStack}
-                  variant="primary"
-                  size="sm"
-                  className="flex-1 sm:flex-initial"
-                >
-                  Save as PDF
-                </ActionButton>
-              </div>
-            </div>
-          )}
-
-          {/* Images Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto p-1">
-            {images.map((item) => (
-              <div
-                key={item.id}
-                className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3 hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-start space-x-3">
-                  {/* Thumbnail */}
-                  <div
-                    onClick={() => {
-                      triggerHaptic(20);
-                      setPreviewItem(item);
-                    }}
-                    className="w-16 h-20 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex-shrink-0 cursor-pointer relative group"
-                  >
-                    <img
-                      src={item.result ? item.result.dataUrl : item.originalUrl}
-                      alt={item.name}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                      <Eye className="w-4 h-4" />
-                    </div>
-                  </div>
-
-                  {/* Details */}
-                  <div className="flex-1 min-w-0 space-y-1">
-                    <h4 className="text-xs font-semibold text-white truncate">
-                      {item.name}
-                    </h4>
-
-                    <div className="text-[11px] text-slate-400">
-                      <span>Original: {formatFileSize(item.originalSize)}</span>
-                      <span className="text-slate-600"> • </span>
-                      <span>
-                        {item.originalWidth}×{item.originalHeight}
-                      </span>
-                    </div>
-
-                    {item.result ? (
-                      <div className="flex items-center space-x-2 pt-0.5">
-                        <span className="text-xs font-bold text-amber-400">
-                          {formatFileSize(item.result.sizeBytes)}
-                        </span>
-                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          -{item.result.reductionPercentage}%
-                        </span>
-                        <span className="text-[10px] text-slate-500">
-                          ({item.result.width}×{item.result.height})
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-slate-500 italic">Not processed yet</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center justify-between border-t border-slate-900 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic(20);
-                      setPreviewItem(item);
-                    }}
-                    className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer min-h-[32px]"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Preview</span>
-                  </button>
-
-                  <div className="flex items-center space-x-1">
-                    {item.result && (
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadSingle(item)}
-                        className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors cursor-pointer min-h-[32px]"
-                      >
-                        <Download className="w-3 h-3" />
-                        <span>Save</span>
-                      </button>
-                    )}
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Preview</span>
+                    </button>
 
                     <button
                       type="button"
-                      onClick={() => removeImage(item.id)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 cursor-pointer min-w-[32px] min-h-[32px] flex items-center justify-center"
-                      title="Remove image"
+                      onClick={() => {
+                        triggerHaptic(25);
+                        downloadFile(compressedPdfBytes, `${pdfFile.name.replace(/\.pdf$/i, '')}_compressed.pdf`);
+                        showToast('Saved compressed PDF!', 'success');
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold cursor-pointer min-h-[36px] flex items-center space-x-1"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download PDF</span>
                     </button>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              )}
+
+              {/* Action Button */}
+              <ActionButton
+                onClick={handleCompressPdfDocument}
+                isLoading={isCompressingPdf}
+                loadingText="Compressing PDF..."
+                icon={Sparkles}
+                variant="amber"
+                size="lg"
+                fullWidth
+              >
+                {compressedPdfBytes ? 'Re-Compress PDF' : 'Compress PDF Document'}
+              </ActionButton>
+            </div>
+          )}
         </div>
+      ) : (
+        /* Image Mode View */
+        <>
+          <FileDropzone
+            onFilesSelected={handleFilesSelected}
+            accept="image/*"
+            multiple={true}
+            title="Add Photos to Resize / Compress"
+            subtitle="Select photos (JPG, PNG, WebP) from your gallery"
+            icon="image"
+          />
+
+          {images.length > 0 && (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 sm:p-6 backdrop-blur-md space-y-5 shadow-xl">
+              {/* Controls Bar */}
+              <div className="space-y-4 border-b border-slate-800 pb-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-white">
+                    Compression Settings ({images.length} photos)
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={clearAllImages}
+                    className="text-xs text-red-400 hover:text-red-300 font-medium px-2.5 py-1.5 rounded-xl hover:bg-red-500/10 cursor-pointer transition-colors"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                {/* Target Size Controls */}
+                {mode === 'target' && (
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-slate-300">
+                        Choose Target Maximum File Size
+                      </label>
+                      <span className="text-xs font-bold text-amber-400">
+                        Target: ≤ {targetKB} KB
+                      </span>
+                    </div>
+
+                    {/* Preset Chips */}
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {TARGET_SIZE_PRESETS.map((kb) => (
+                        <button
+                          key={kb}
+                          type="button"
+                          onClick={() => handleTargetPresetClick(kb)}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer min-h-[36px] ${
+                            targetKB === kb
+                              ? 'bg-amber-600/30 border-amber-500 text-amber-300 shadow-sm'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                          }`}
+                        >
+                          {kb} KB
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Custom Input */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-xs text-slate-400">Custom Target:</span>
+                      <div className="flex items-center space-x-1.5">
+                        <input
+                          type="number"
+                          min="5"
+                          max="10000"
+                          value={customTargetInput}
+                          onChange={(e) => handleCustomTargetChange(e.target.value)}
+                          className="w-20 bg-slate-900 border border-slate-800 text-slate-100 text-xs px-2.5 py-1.5 rounded-xl focus:outline-none focus:border-amber-500 min-h-[34px]"
+                        />
+                        <span className="text-xs font-bold text-slate-300">KB</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500">
+                        (e.g., 20 for govt forms, 50 for PAN/passport)
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Exact Dimension Controls */}
+                {mode === 'dimension' && (
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-4">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 mb-2 block">
+                        Choose Dimension Preset (Forms / Documents)
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                        {DIMENSION_PRESETS.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => handleDimPresetClick(p)}
+                            className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between min-h-[72px] ${
+                              activeDimPreset === p.id && customWidth === p.w && customHeight === p.h
+                                ? 'bg-amber-600/25 border-amber-500 text-white shadow-sm'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-xs font-bold truncate">{p.label}</span>
+                            <span className="text-[10px] text-amber-400 mt-1">{p.w}×{p.h} px</span>
+                            <span className="text-[9px] text-slate-500">{p.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-400">Width (Pixels):</span>
+                        <input
+                          type="number"
+                          min="20"
+                          max="4000"
+                          value={customWidth}
+                          onChange={(e) => setCustomWidth(parseInt(e.target.value, 10) || 100)}
+                          className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-400">Height (Pixels):</span>
+                        <input
+                          type="number"
+                          min="20"
+                          max="4000"
+                          value={customHeight}
+                          onChange={(e) => setCustomHeight(parseInt(e.target.value, 10) || 100)}
+                          className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <span className="text-xs text-slate-400">Fit Strategy:</span>
+                        <select
+                          value={fitMode}
+                          onChange={(e) => setFitMode(e.target.value as any)}
+                          className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs p-2 rounded-xl focus:outline-none focus:border-amber-500 cursor-pointer"
+                        >
+                          <option value="cover">Crop / Fill (No Distortion)</option>
+                          <option value="contain">Fit with White Margins</option>
+                          <option value="stretch">Stretch to Fit Exact</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual Resize Controls */}
+                {mode === 'manual' && (
+                  <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs text-slate-400">
+                        <span>Quality</span>
+                        <span className="text-amber-400 font-bold">{quality}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="5"
+                        max="100"
+                        value={quality}
+                        onChange={(e) => setQuality(parseInt(e.target.value, 10))}
+                        className="w-full accent-amber-500 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs text-slate-400">
+                        <span>Scale Resolution</span>
+                        <span className="text-amber-400 font-bold">{scalePercentage}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="15"
+                        max="100"
+                        step="5"
+                        value={scalePercentage}
+                        onChange={(e) => setScalePercentage(parseInt(e.target.value, 10))}
+                        className="w-full accent-amber-500 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-slate-400">Output Format</label>
+                      <select
+                        value={format}
+                        onChange={(e) => setFormat(e.target.value as any)}
+                        className="w-full bg-slate-900 border border-slate-800 text-slate-100 text-xs rounded-xl p-2 focus:outline-none focus:border-amber-500 cursor-pointer"
+                      >
+                        <option value="image/jpeg">JPG (Standard photo)</option>
+                        <option value="image/webp">WebP (Modern & Smallest)</option>
+                        <option value="image/png">PNG (Lossless)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Compress Button */}
+                <ActionButton
+                  onClick={handleCompressAll}
+                  isLoading={isProcessingAll}
+                  loadingText={`Processing ${images.length} Images...`}
+                  icon={Sparkles}
+                  variant="amber"
+                  size="lg"
+                  fullWidth
+                >
+                  {hasAnyResults
+                    ? 'Re-Process All Images'
+                    : mode === 'target'
+                    ? `Compress All to ≤ ${targetKB} KB`
+                    : mode === 'dimension'
+                    ? `Resize All to ${customWidth}×${customHeight} px`
+                    : `Apply Custom Scale & Quality`}
+                </ActionButton>
+              </div>
+
+              {/* Stats Bar */}
+              {hasAnyResults && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-2xl">
+                  <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold">
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                    <span className="break-all">
+                      Reduced: {formatFileSize(totalOriginalBytes)} ➔{' '}
+                      {formatFileSize(totalCompressedBytes)} (
+                      {totalOriginalBytes > 0
+                        ? Math.round(
+                            ((totalOriginalBytes - totalCompressedBytes) / totalOriginalBytes) * 100
+                          )
+                        : 0}
+                      % Saved)
+                    </span>
+                  </div>
+
+                  {/* Batch Export Options */}
+                  <div className="flex items-center space-x-2 w-full sm:w-auto">
+                    <ActionButton
+                      onClick={handleDownloadZip}
+                      isLoading={isZipping}
+                      loadingText="Zipping..."
+                      icon={Archive}
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 sm:flex-initial"
+                    >
+                      Download ZIP
+                    </ActionButton>
+
+                    <ActionButton
+                      onClick={handleSaveToPdf}
+                      isLoading={isPdfExporting}
+                      loadingText="Saving..."
+                      icon={FileStack}
+                      variant="primary"
+                      size="sm"
+                      className="flex-1 sm:flex-initial"
+                    >
+                      Save as PDF
+                    </ActionButton>
+                  </div>
+                </div>
+              )}
+
+              {/* Images Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto p-1">
+                {images.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 flex flex-col justify-between space-y-3 hover:border-slate-700 transition-colors"
+                  >
+                    <div className="flex items-start space-x-3">
+                      {/* Thumbnail */}
+                      <div
+                        onClick={() => {
+                          triggerHaptic(20);
+                          setPreviewItem(item);
+                        }}
+                        className="w-16 h-20 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex-shrink-0 cursor-pointer relative group"
+                      >
+                        <img
+                          src={item.result ? item.result.dataUrl : item.originalUrl}
+                          alt={item.name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                          <Eye className="w-4 h-4" />
+                        </div>
+                      </div>
+
+                      {/* Details */}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <h4 className="text-xs font-semibold text-white truncate">
+                          {item.name}
+                        </h4>
+
+                        <div className="text-[11px] text-slate-400">
+                          <span>Original: {formatFileSize(item.originalSize)}</span>
+                          <span className="text-slate-600"> • </span>
+                          <span>
+                            {item.originalWidth}×{item.originalHeight}
+                          </span>
+                        </div>
+
+                        {item.result ? (
+                          <div className="flex items-center space-x-2 pt-0.5">
+                            <span className="text-xs font-bold text-amber-400">
+                              {formatFileSize(item.result.sizeBytes)}
+                            </span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              -{item.result.reductionPercentage}%
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              ({item.result.width}×{item.result.height})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 italic">Not processed yet</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-between border-t border-slate-900 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic(20);
+                          setPreviewItem(item);
+                        }}
+                        className="text-[11px] text-slate-400 hover:text-white flex items-center space-x-1 cursor-pointer min-h-[32px]"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Preview</span>
+                      </button>
+
+                      <div className="flex items-center space-x-1">
+                        {item.result && (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSingle(item)}
+                            className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-colors cursor-pointer min-h-[32px]"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Save</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => removeImage(item.id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 cursor-pointer min-w-[32px] min-h-[32px] flex items-center justify-center"
+                          title="Remove image"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Preview Modal */}
+      {/* PDF Compression Preview Modal */}
+      {compressedPdfBytes && (
+        <PdfViewerModal
+          isOpen={isPdfPreviewOpen}
+          onClose={() => setIsPdfPreviewOpen(false)}
+          pdfData={compressedPdfBytes}
+          filename={`${pdfFile?.name.replace(/\.pdf$/i, '') || 'document'}_compressed.pdf`}
+        />
+      )}
+
+      {/* Image Preview Modal */}
       {previewItem && (
         <div
           onClick={() => setPreviewItem(null)}

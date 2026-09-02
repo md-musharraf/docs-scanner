@@ -73,7 +73,8 @@ function normalizeIlluminationAndShadows(
 function applySauvolaMagicBW(
   data: Uint8ClampedArray,
   width: number,
-  height: number
+  height: number,
+  sensitivity: number = 0.22
 ) {
   const wPlus1 = width + 1;
   const total = wPlus1 * (height + 1);
@@ -100,7 +101,7 @@ function applySauvolaMagicBW(
   }
 
   const radius = Math.max(12, Math.min(50, Math.round(width * 0.035)));
-  const k = 0.22;
+  const k = Math.max(0.05, Math.min(0.5, sensitivity));
   const R = 128;
 
   for (let y = 0; y < height; y++) {
@@ -224,7 +225,7 @@ export async function applyImageFilter(
 
   // 3. Document Filter Presets
   if (opts.filter === 'bw_document') {
-    applySauvolaMagicBW(data, targetWidth, targetHeight);
+    applySauvolaMagicBW(data, targetWidth, targetHeight, opts.sauvolaSensitivity);
   } else if (opts.filter === 'magic_color') {
     // Magic Color: whiten paper while enriching color ink/stamps
     for (let i = 0; i < data.length; i += 4) {

@@ -11,8 +11,13 @@ import {
   Maximize,
   Minimize,
   RotateCw,
+  Moon,
+  Sun,
+  LayoutGrid,
+  BookOpen,
 } from 'lucide-react';
-import { renderPdfPage, getPdfPageCount } from '../../lib/pdfRenderer';
+import { renderPdfPage, getPdfPageCount, renderAllPdfPages } from '../../lib/pdfRenderer';
+import type { RenderedPage } from '../../core/types';
 import { downloadFile, shareDocument } from '../../lib/storage';
 import { triggerHaptic } from '../../utils/formatters';
 import { useToast } from '../../hooks/useToast';
@@ -24,6 +29,8 @@ interface PdfViewerModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+type ReadingMode = 'normal' | 'dark' | 'sepia';
 
 export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   pdfData,
@@ -41,6 +48,12 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [rotationAngle, setRotationAngle] = useState(0);
+
+  // Advanced Reading & Navigation States
+  const [readingMode, setReadingMode] = useState<ReadingMode>('normal');
+  const [showThumbnails, setShowThumbnails] = useState(false);
+  const [thumbnails, setThumbnails] = useState<RenderedPage[]>([]);
+  const [loadingThumbnails, setLoadingThumbnails] = useState(false);
 
   const renderPage = useCallback(
     async (data: Uint8Array, page: number, currentScale: number) => {
@@ -110,6 +123,29 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     }
   }, [pdfData, scale, currentPage, renderPage]);
 
+  const toggleReadingMode = () => {
+    triggerHaptic(20);
+    setReadingMode((prev) => (prev === 'normal' ? 'dark' : prev === 'dark' ? 'sepia' : 'normal'));
+  };
+
+  const toggleThumbnails = async () => {
+    triggerHaptic(20);
+    const nextState = !showThumbnails;
+    setShowThumbnails(nextState);
+
+    if (nextState && pdfData && thumbnails.length === 0) {
+      setLoadingThumbnails(true);
+      try {
+        const rendered = await renderAllPdfPages(pdfData, 0.35);
+        setThumbnails(rendered);
+      } catch (err) {
+        logger.error('PdfViewer', 'Error rendering thumbnails', err);
+      } finally {
+        setLoadingThumbnails(false);
+      }
+    }
+  };
+
   useEffect(() => {
     if (!isOpen || !pdfData) {
       return;
@@ -124,6 +160,8 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         setPageInput('1');
         setScale(1.4);
         setRotationAngle(0);
+        setThumbnails([]);
+        setShowThumbnails(false);
         const rendered = await renderPdfPage(pdfData, 1, 1.4);
         if (isMounted) {
           setPageImage(rendered.dataUrl);
@@ -189,17 +227,14 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     try {
       const blob = new Blob([pdfData as any], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
-      // Try opening in a new window for more reliable printing
       const printWindow = window.open(url, '_blank');
       if (printWindow) {
         printWindow.addEventListener('afterprint', () => {
           printWindow.close();
           URL.revokeObjectURL(url);
         });
-        // Fallback cleanup if user closes the window without printing
         setTimeout(() => URL.revokeObjectURL(url), 120000);
       } else {
-        // Fallback: use iframe approach
         const iframe = document.createElement('iframe');
         iframe.style.position = 'fixed';
         iframe.style.right = '0';
@@ -211,7 +246,6 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         iframe.src = url;
         document.body.appendChild(iframe);
 
-        // Guaranteed cleanup even if onload doesn't fire
         const cleanupTimer = setTimeout(() => {
           if (document.body.contains(iframe)) document.body.removeChild(iframe);
           URL.revokeObjectURL(url);
@@ -242,7 +276,6 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     }
   };
 
-  // Sync fullscreen state with browser's fullscreen API
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFsChange);
@@ -255,6 +288,14 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   };
 
   if (!isOpen || !pdfData) return null;
+
+  // Reading mode filter class / styles
+  const readingFilterClass =
+    readingMode === 'dark'
+      ? 'invert contrast-[0.95] hue-rotate-180 brightness-[0.88]'
+      : readingMode === 'sepia'
+      ? 'sepia contrast-[1.05] brightness-[0.95]'
+      : '';
 
   return (
     <div
@@ -278,7 +319,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
           <div className="min-w-0">
             <h3
-              className="text-xs sm:text-sm font-bold text-white truncate max-w-[160px] xs:max-w-[220px] sm:max-w-md"
+              className="text-xs sm:text-sm font-bold text-white truncate max-w-[140px] xs:max-w-[200px] sm:max-w-md"
               title={filename}
             >
               {filename}
@@ -293,6 +334,40 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
         {/* Top Controls Toolbar */}
         <div className="flex items-center space-x-1 sm:space-x-1.5 flex-shrink-0">
+          {/* Thumbnails grid button */}
+          <button
+            type="button"
+            onClick={toggleThumbnails}
+            className={`p-2 rounded-xl border transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center ${
+              showThumbnails
+                ? 'bg-blue-600 border-blue-500 text-white shadow-sm'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title="Page Thumbnails"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+
+          {/* Reading Mode Toggle (Normal / Dark / Sepia) */}
+          <button
+            type="button"
+            onClick={toggleReadingMode}
+            className={`p-2 rounded-xl border transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center ${
+              readingMode !== 'normal'
+                ? 'bg-amber-600/25 border-amber-500 text-amber-300 shadow-sm'
+                : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+            title={`Reading Mode: ${readingMode.toUpperCase()}`}
+          >
+            {readingMode === 'dark' ? (
+              <Moon className="w-4 h-4 text-purple-400" />
+            ) : readingMode === 'sepia' ? (
+              <BookOpen className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Sun className="w-4 h-4 text-slate-300" />
+            )}
+          </button>
+
           {/* Zoom controls */}
           <div className="hidden sm:flex items-center space-x-0.5 bg-slate-950/80 rounded-xl p-1 border border-slate-800">
             <button
@@ -373,32 +448,88 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
         </div>
       </div>
 
-      {/* Main Canvas Viewer */}
-      <div className="flex-1 overflow-auto p-2 sm:p-4 flex items-center justify-center relative select-none touch-pan-x touch-pan-y">
-        {isLoading ? (
-          <div className="flex flex-col items-center space-y-3">
-            <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-            <p className="text-xs sm:text-sm text-slate-400 font-medium">
-              Rendering page {currentPage} of {totalPages}...
-            </p>
+      {/* Main Body with optional Thumbnail Drawer */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Thumbnails Sidebar Drawer */}
+        {showThumbnails && (
+          <div className="w-48 sm:w-56 bg-slate-900/95 border-r border-slate-800 overflow-y-auto p-3 space-y-3 flex-shrink-0 z-10 animate-in slide-in-from-left duration-200">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+              <span className="text-xs font-bold text-slate-300">Pages ({totalPages})</span>
+              <button
+                type="button"
+                onClick={() => setShowThumbnails(false)}
+                className="text-slate-400 hover:text-white text-xs p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {loadingThumbnails ? (
+              <div className="py-8 text-center space-y-2">
+                <div className="w-6 h-6 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto"></div>
+                <p className="text-[11px] text-slate-400">Loading previews...</p>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {thumbnails.map((t) => (
+                  <button
+                    key={t.pageNumber}
+                    type="button"
+                    onClick={() => {
+                      goToPage(t.pageNumber);
+                    }}
+                    className={`w-full text-left rounded-xl p-1.5 border transition-all cursor-pointer flex flex-col space-y-1 ${
+                      currentPage === t.pageNumber
+                        ? 'bg-blue-600/20 border-blue-500 shadow-sm'
+                        : 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="aspect-[3/4] bg-white rounded-lg overflow-hidden relative">
+                      <img
+                        src={t.dataUrl}
+                        alt={`Page ${t.pageNumber}`}
+                        className={`w-full h-full object-contain ${readingFilterClass}`}
+                      />
+                    </div>
+                    <span
+                      className={`text-[10px] text-center font-bold block ${
+                        currentPage === t.pageNumber ? 'text-blue-400' : 'text-slate-400'
+                      }`}
+                    >
+                      Page {t.pageNumber}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        ) : pageImage ? (
-          <div
-            className="relative shadow-2xl rounded-xl overflow-hidden border border-slate-800 bg-white transition-transform duration-200 inline-block"
-            style={{ transform: `rotate(${rotationAngle}deg)` }}
-          >
-            <img
-              src={pageImage}
-              alt={`Page ${currentPage}`}
-              className={`object-contain select-none block ${
-                scale <= 1.4
-                  ? 'max-w-full max-h-[72vh]'
-                  : ''
-              }`}
-              style={scale > 1.4 ? { width: 'auto', height: 'auto' } : undefined}
-            />
-          </div>
-        ) : null}
+        )}
+
+        {/* Main Canvas Viewer */}
+        <div className="flex-1 overflow-auto p-2 sm:p-4 flex items-center justify-center relative select-none touch-pan-x touch-pan-y">
+          {isLoading ? (
+            <div className="flex flex-col items-center space-y-3">
+              <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+              <p className="text-xs sm:text-sm text-slate-400 font-medium">
+                Rendering page {currentPage} of {totalPages}...
+              </p>
+            </div>
+          ) : pageImage ? (
+            <div
+              className={`relative shadow-2xl rounded-xl overflow-hidden border border-slate-800 bg-white transition-transform duration-200 inline-block ${readingFilterClass}`}
+              style={{ transform: `rotate(${rotationAngle}deg)` }}
+            >
+              <img
+                src={pageImage}
+                alt={`Page ${currentPage}`}
+                className={`object-contain select-none block ${
+                  scale <= 1.4 ? 'max-w-full max-h-[72vh]' : ''
+                }`}
+                style={scale > 1.4 ? { width: 'auto', height: 'auto' } : undefined}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Bottom Paging Toolbar */}
@@ -441,4 +572,5 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
     </div>
   );
 };
+
 

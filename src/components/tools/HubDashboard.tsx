@@ -62,9 +62,9 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
     },
     {
       id: 'resize',
-      title: 'Target KB & Resize',
-      subtitle: 'Compress photos to exact 20KB/50KB or passport, ID & signature dimensions',
-      tag: 'Govt Forms & Visas',
+      title: 'Target KB & Compressor',
+      subtitle: 'Compress photos to exact 20KB/50KB, passport/ID dimensions, or compress PDF documents',
+      tag: 'Photos & PDFs',
       tagColor: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
       icon: Minimize2,
       gradient: 'from-amber-600/20 via-orange-600/10 to-transparent',
@@ -113,8 +113,8 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
     {
       id: 'tools',
       title: 'PDF Power Tools',
-      subtitle: 'Stamp custom watermarks, rotate pages (90°/180°), and delete unwanted sheets',
-      tag: 'Watermark & Trim',
+      subtitle: 'Watermarks, page numbering, visual page organizer, metadata editor & page trimmer',
+      tag: '5-in-1 Suite',
       tagColor: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
       icon: SlidersHorizontal,
       gradient: 'from-purple-600/20 via-pink-600/10 to-transparent',
@@ -123,7 +123,7 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
     {
       id: 'saved',
       title: 'Offline Library',
-      subtitle: 'Search, preview, share, and manage all your on-device saved PDF documents',
+      subtitle: 'Category filters, multi-select batch actions, search, and zip backups',
       tag: `${savedDocs.length} Saved`,
       tagColor: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
       icon: FolderArchive,

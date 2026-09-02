@@ -1,8 +1,15 @@
 import { PDFDocument, rgb, degrees, StandardFonts, PageSizes } from 'pdf-lib';
-import type { ImageToPdfOptions, WatermarkOptions } from '../core/types';
+import type {
+  ImageToPdfOptions,
+  WatermarkOptions,
+  PageNumberOptions,
+  PdfMetadataOptions,
+  PdfCompressionOptions,
+} from '../core/types';
 import { logger } from '../core/logger';
+import { renderAllPdfPages } from './pdfRenderer';
 
-export type { ImageToPdfOptions, WatermarkOptions };
+export type { ImageToPdfOptions, WatermarkOptions, PageNumberOptions, PdfMetadataOptions, PdfCompressionOptions };
 
 /**
  * Merge multiple PDF byte buffers into a single PDF
@@ -51,6 +58,45 @@ export async function splitPDF(pdfBuffer: ArrayBuffer, pageIndices: number[]): P
     return saved;
   } catch (err) {
     logger.error('PdfEngine', 'Error splitting PDF', err);
+    throw err;
+  }
+}
+
+/**
+ * Reorganize, reorder, duplicate, and rotate pages of a PDF document
+ * @param pageIndices Array of 0-indexed page numbers in desired output order
+ * @param rotations Optional map of target output page index to additional degrees
+ */
+export async function reorganizePDFPages(
+  pdfBuffer: ArrayBuffer,
+  pageIndices: number[],
+  rotations: Record<number, number> = {}
+): Promise<Uint8Array> {
+  logger.time('ReorganizePDFPages');
+  try {
+    const sourcePdf = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const newPdf = await PDFDocument.create();
+    const totalPages = sourcePdf.getPageCount();
+
+    const validIndices = pageIndices.filter((idx) => idx >= 0 && idx < totalPages);
+    if (validIndices.length === 0) {
+      throw new Error('No valid page sequence provided');
+    }
+
+    const copiedPages = await newPdf.copyPages(sourcePdf, validIndices);
+    copiedPages.forEach((page, outIdx) => {
+      if (rotations[outIdx]) {
+        const currentRot = page.getRotation().angle;
+        page.setRotation(degrees((currentRot + rotations[outIdx]) % 360));
+      }
+      newPdf.addPage(page);
+    });
+
+    const saved = await newPdf.save();
+    logger.timeEnd('PdfEngine', 'ReorganizePDFPages');
+    return saved;
+  } catch (err) {
+    logger.error('PdfEngine', 'Error reorganizing PDF pages', err);
     throw err;
   }
 }
@@ -221,9 +267,6 @@ export async function addWatermarkToPDF(
       const angleRad = ((options.angle !== undefined ? options.angle : -45) * Math.PI) / 180;
       const cosA = Math.cos(angleRad);
       const sinA = Math.sin(angleRad);
-      // The anchor point for drawText is the baseline-left of the text.
-      // After rotation around anchor, we need to offset so the rotated
-      // bounding box center aligns with the page center.
       const cx = width / 2;
       const cy = height / 2;
       const x = cx - (textWidth * cosA - textHeight * sinA) / 2;
@@ -245,6 +288,165 @@ export async function addWatermarkToPDF(
     return saved;
   } catch (err) {
     logger.error('PdfEngine', 'Error adding watermark to PDF', err);
+    throw err;
+  }
+}
+
+/**
+ * Add clean page numbers to PDF pages (Header or Footer)
+ */
+export async function addPageNumbersToPDF(
+  pdfBuffer: ArrayBuffer,
+  options: PageNumberOptions
+): Promise<Uint8Array> {
+  logger.time('AddPageNumbers');
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const pages = pdfDoc.getPages();
+    const totalPages = pages.length;
+
+    const fontSize = options.fontSize || 10;
+    const opacity = options.opacity !== undefined ? options.opacity : 0.85;
+    const color = options.color
+      ? rgb(options.color.r, options.color.g, options.color.b)
+      : rgb(0.2, 0.2, 0.2);
+    const startPage = options.startPage || 1;
+
+    for (let i = 0; i < totalPages; i++) {
+      const pageNum = i + startPage;
+      const page = pages[i];
+      const { width, height } = page.getSize();
+
+      let text = `${pageNum}`;
+      if (options.format === 'page_of_total') {
+        text = options.prefix ? `${options.prefix} ${pageNum} of ${totalPages}` : `Page ${pageNum} of ${totalPages}`;
+      } else if (options.format === 'simple_slash') {
+        text = `${pageNum} / ${totalPages}`;
+      } else if (options.prefix) {
+        text = `${options.prefix} ${pageNum}`;
+      }
+
+      const textWidth = font.widthOfTextAtSize(text, fontSize);
+      const margin = 28;
+
+      let x = (width - textWidth) / 2;
+      let y = margin;
+
+      if (options.position === 'bottom_left') {
+        x = margin;
+        y = margin;
+      } else if (options.position === 'bottom_right') {
+        x = width - textWidth - margin;
+        y = margin;
+      } else if (options.position === 'top_center') {
+        x = (width - textWidth) / 2;
+        y = height - margin - fontSize;
+      } else if (options.position === 'top_right') {
+        x = width - textWidth - margin;
+        y = height - margin - fontSize;
+      }
+
+      page.drawText(text, {
+        x,
+        y,
+        size: fontSize,
+        font,
+        color,
+        opacity,
+      });
+    }
+
+    const saved = await pdfDoc.save();
+    logger.timeEnd('PdfEngine', 'AddPageNumbers');
+    return saved;
+  } catch (err) {
+    logger.error('PdfEngine', 'Error adding page numbers', err);
+    throw err;
+  }
+}
+
+/**
+ * Read metadata from a PDF document
+ */
+export async function getPDFMetadata(pdfBuffer: ArrayBuffer): Promise<PdfMetadataOptions> {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    return {
+      title: pdfDoc.getTitle() || '',
+      author: pdfDoc.getAuthor() || '',
+      subject: pdfDoc.getSubject() || '',
+      keywords: pdfDoc.getKeywords() ? pdfDoc.getKeywords()!.split(';') : [],
+      creator: pdfDoc.getCreator() || '',
+    };
+  } catch (err) {
+    logger.error('PdfEngine', 'Error reading PDF metadata', err);
+    return {};
+  }
+}
+
+/**
+ * Update metadata in a PDF document
+ */
+export async function updatePDFMetadata(
+  pdfBuffer: ArrayBuffer,
+  metadata: PdfMetadataOptions
+): Promise<Uint8Array> {
+  logger.time('UpdateMetadata');
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    if (metadata.title !== undefined) pdfDoc.setTitle(metadata.title);
+    if (metadata.author !== undefined) pdfDoc.setAuthor(metadata.author);
+    if (metadata.subject !== undefined) pdfDoc.setSubject(metadata.subject);
+    if (metadata.keywords !== undefined) pdfDoc.setKeywords(metadata.keywords);
+    if (metadata.creator !== undefined) pdfDoc.setCreator(metadata.creator);
+
+    pdfDoc.setModificationDate(new Date());
+
+    const saved = await pdfDoc.save();
+    logger.timeEnd('PdfEngine', 'UpdateMetadata');
+    return saved;
+  } catch (err) {
+    logger.error('PdfEngine', 'Error updating PDF metadata', err);
+    throw err;
+  }
+}
+
+/**
+ * Compress an entire PDF document by downsampling/re-encoding pages to target resolution and quality
+ */
+export async function compressPDFDocument(
+  pdfBuffer: ArrayBuffer,
+  options: PdfCompressionOptions = { quality: 0.75, scale: 1.0 },
+  onProgress?: (current: number, total: number) => void
+): Promise<Uint8Array> {
+  logger.time('CompressPDF');
+  try {
+    const scale = options.scale || 1.0;
+    const pages = await renderAllPdfPages(pdfBuffer, scale, onProgress, 'jpeg');
+
+    if (pages.length === 0) {
+      throw new Error('No pages rendered for compression');
+    }
+
+    const compressedPdf = await PDFDocument.create();
+
+    for (const page of pages) {
+      const jpgImage = await compressedPdf.embedJpg(page.dataUrl);
+      const pdfPage = compressedPdf.addPage([page.width, page.height]);
+      pdfPage.drawImage(jpgImage, {
+        x: 0,
+        y: 0,
+        width: page.width,
+        height: page.height,
+      });
+    }
+
+    const saved = await compressedPdf.save();
+    logger.timeEnd('PdfEngine', 'CompressPDF');
+    return saved;
+  } catch (err) {
+    logger.error('PdfEngine', 'Error compressing PDF', err);
     throw err;
   }
 }
@@ -284,3 +486,4 @@ export async function removePagesFromPDF(
     throw err;
   }
 }
+

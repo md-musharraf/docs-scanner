@@ -67,8 +67,48 @@ export const CropModal: React.FC<CropModalProps> = ({
   const [autoLight, setAutoLight] = useState(true);
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
+  const [sauvolaSensitivity, setSauvolaSensitivity] = useState(0.20);
+  const [aspectRatioPreset, setAspectRatioPreset] = useState<'free' | 'a4' | 'id_card' | 'square'>('free');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showLightingControls, setShowLightingControls] = useState(false);
+
+  const applyAspectRatio = (ratioType: 'free' | 'a4' | 'id_card' | 'square') => {
+    triggerHaptic(20);
+    setAspectRatioPreset(ratioType);
+    if (!naturalSize.width || !naturalSize.height) return;
+
+    if (ratioType === 'free') {
+      return;
+    }
+
+    let targetRatio = 1.0;
+    if (ratioType === 'a4') targetRatio = 1 / 1.4142; // W/H
+    if (ratioType === 'id_card') targetRatio = 85.6 / 53.98; // W/H
+    if (ratioType === 'square') targetRatio = 1.0;
+
+    const imgW = naturalSize.width;
+    const imgH = naturalSize.height;
+
+    let boxW = imgW * 0.88;
+    let boxH = boxW / targetRatio;
+
+    if (boxH > imgH * 0.88) {
+      boxH = imgH * 0.88;
+      boxW = boxH * targetRatio;
+    }
+
+    const offsetX = (imgW - boxW) / 2;
+    const offsetY = (imgH - boxH) / 2;
+
+    setCorners({
+      topLeft: { x: offsetX, y: offsetY },
+      topRight: { x: offsetX + boxW, y: offsetY },
+      bottomRight: { x: offsetX + boxW, y: offsetY + boxH },
+      bottomLeft: { x: offsetX, y: offsetY + boxH },
+    });
+
+    showToast(`Applied ${ratioType.toUpperCase()} aspect boundary`, 'info');
+  };
 
   // Load image and detect corners
   useEffect(() => {
@@ -212,43 +252,47 @@ export const CropModal: React.FC<CropModalProps> = ({
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
-  const handleEdgePointerDown = (edgeKey: 'top' | 'right' | 'bottom' | 'left', e: React.PointerEvent) => {
+  const handleEdgePointerDown = (key: 'top' | 'right' | 'bottom' | 'left', e: React.PointerEvent) => {
     if (!corners) return;
-    e.preventDefault();
     e.stopPropagation();
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore
+    }
     triggerHaptic(20);
-    const currentNatX = toNaturalX(e.clientX);
-    const currentNatY = toNaturalY(e.clientY);
+    const startPos = {
+      x: toNaturalX(e.clientX - displaySize.left),
+      y: toNaturalY(e.clientY - displaySize.top),
+    };
 
     setDragTarget({
       type: 'edge',
-      key: edgeKey,
-      startPos: { x: currentNatX, y: currentNatY },
+      key,
+      startPos,
       startCorners: { ...corners },
     });
     setDragClientPos({ x: e.clientX, y: e.clientY });
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragTarget || !corners) return;
-    e.preventDefault();
-    setDragClientPos({ x: e.clientX, y: e.clientY });
+    if (!dragTarget || !corners || displaySize.width <= 0) return;
 
-    const natX = toNaturalX(e.clientX);
-    const natY = toNaturalY(e.clientY);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    setDragClientPos({ x: clientX, y: clientY });
+
+    const dispX = clientX - displaySize.left;
+    const dispY = clientY - displaySize.top;
+
+    const natX = toNaturalX(dispX);
+    const natY = toNaturalY(dispY);
 
     if (dragTarget.type === 'corner') {
-      const cornerKey = dragTarget.key;
-      setCorners((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          [cornerKey]: clampPoint({ x: natX, y: natY }, naturalSize.width, naturalSize.height),
-        };
-      });
+      const clamped = clampPoint({ x: natX, y: natY }, naturalSize.width, naturalSize.height);
+      setCorners((prev) => (prev ? { ...prev, [dragTarget.key]: clamped } : prev));
     } else {
-      // Edge drag: move both attached corners simultaneously
+      // Edge drag
       const dx = natX - dragTarget.startPos.x;
       const dy = natY - dragTarget.startPos.y;
       const base = dragTarget.startCorners;
@@ -357,6 +401,7 @@ export const CropModal: React.FC<CropModalProps> = ({
         autoLight,
         brightness,
         contrast,
+        sauvolaSensitivity,
       });
 
       // Clean memory safely
@@ -562,8 +607,33 @@ export const CropModal: React.FC<CropModalProps> = ({
         )}
       </div>
 
-      {/* Quick Toolbar */}
+      {/* Bottom Controls Bar */}
       <div className="bg-slate-900/95 border-t border-slate-800 p-3 space-y-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+        {/* Aspect Ratio Presets Bar */}
+        <div className="flex items-center justify-between gap-1.5 max-w-lg mx-auto bg-slate-950/60 p-1 rounded-xl border border-slate-800 text-[11px]">
+          <span className="text-slate-500 font-semibold px-2 hidden xs:inline">Ratio:</span>
+          {[
+            { id: 'free' as const, label: 'Freeform' },
+            { id: 'a4' as const, label: 'A4 Document' },
+            { id: 'id_card' as const, label: 'ID Card' },
+            { id: 'square' as const, label: 'Square' },
+          ].map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => applyAspectRatio(r.id)}
+              className={`flex-1 py-1 px-1.5 rounded-lg text-center font-medium transition-colors cursor-pointer ${
+                aspectRatioPreset === r.id
+                  ? 'bg-blue-600/30 text-blue-300 font-bold border border-blue-500/40'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Quick Toolbar */}
         <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           <button
             type="button"
@@ -609,7 +679,7 @@ export const CropModal: React.FC<CropModalProps> = ({
           </button>
         </div>
 
-        {/* Lighting & Contrast Adjustments */}
+        {/* Lighting & Sauvola Threshold Adjustments */}
         {showLightingControls && (
           <div className="bg-slate-950/90 border border-slate-800 p-3 rounded-2xl space-y-2.5 max-w-lg mx-auto animate-in fade-in duration-150 shadow-xl">
             <div className="flex items-center justify-between">
@@ -661,6 +731,25 @@ export const CropModal: React.FC<CropModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Sauvola Ink Sensitivity */}
+            {activeFilter === 'bw_document' && (
+              <div className="space-y-1 pt-1 border-t border-slate-800/80">
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>Ink Darkness (Sauvola Sensitivity)</span>
+                  <span className="text-blue-400 font-bold">{Math.round(sauvolaSensitivity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="0.45"
+                  step="0.02"
+                  value={sauvolaSensitivity}
+                  onChange={(e) => setSauvolaSensitivity(parseFloat(e.target.value))}
+                  className="w-full accent-blue-500 cursor-pointer"
+                />
+              </div>
+            )}
           </div>
         )}
 
