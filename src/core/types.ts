@@ -24,7 +24,7 @@ export interface ImageEnhanceOptions {
 
 export interface ImageToPdfOptions {
   pageSize: 'a4' | 'letter' | 'fit';
-  orientation: 'portrait' | 'landscape';
+  orientation: 'portrait' | 'landscape' | 'auto';
   margin: number; // points
   quality?: number;
 }

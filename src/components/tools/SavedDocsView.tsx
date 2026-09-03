@@ -149,7 +149,9 @@ export const SavedDocsView: React.FC<SavedDocsViewProps> = ({ documents, onRefre
       for (const doc of selectedDocs) {
         const data = await getDocumentData(doc.id);
         if (data) {
-          buffers.push(data.buffer as ArrayBuffer);
+          const copy = new Uint8Array(data.byteLength);
+          copy.set(data);
+          buffers.push(copy.buffer as ArrayBuffer);
         }
       }
 

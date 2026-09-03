@@ -16,6 +16,7 @@ import {
   triggerCelebration,
   triggerHaptic,
 } from '../../utils/formatters';
+import { generateDocumentThumbnail } from '../../utils/fileUtils';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -107,13 +108,14 @@ export const MergePdfTool: React.FC<MergePdfToolProps> = ({ onDocumentSaved }) =
 
       const totalPages = files.reduce((sum, f) => sum + f.pageCount, 0);
       const finalName = ensurePdfExtension(mergedFilename, 'Merged');
+      const thumbnail = await generateDocumentThumbnail(mergedBytes);
 
       // Save to offline storage
       await saveDocumentLocally({
         name: finalName,
         sizeBytes: mergedBytes.byteLength,
         pageCount: totalPages,
-        thumbnailUrl: '',
+        thumbnailUrl: thumbnail,
         data: mergedBytes,
       });
 

@@ -26,6 +26,7 @@ import { imagesToPDF, compressPDFDocument } from '../../lib/pdfEngine';
 import { getPdfPageCount } from '../../lib/pdfRenderer';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { formatFileSize, ensurePdfExtension, sanitizeFilename, triggerCelebration, triggerHaptic } from '../../utils/formatters';
+import { generateDocumentThumbnail } from '../../utils/fileUtils';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -274,11 +275,13 @@ export const ResizeCompressTool: React.FC<ResizeCompressToolProps> = ({ onDocume
       const baseName = pdfFile.name.replace(/\.pdf$/i, '');
       const outName = ensurePdfExtension(`${baseName}_compressed_${Math.round(compressed.byteLength / 1024)}kb`);
 
+      const thumbnail = await generateDocumentThumbnail(compressed);
+
       await saveDocumentLocally({
         name: outName,
         sizeBytes: compressed.byteLength,
         pageCount: pdfPageCount,
-        thumbnailUrl: '',
+        thumbnailUrl: thumbnail,
         category: 'compress',
         data: compressed,
       });

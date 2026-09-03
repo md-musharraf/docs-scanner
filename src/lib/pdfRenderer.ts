@@ -3,6 +3,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { RenderedPage } from '../core/types';
 import { APP_CONFIG } from '../core/constants';
 import { logger } from '../core/logger';
+import { disposeCanvas } from '../utils/geometry';
 
 export type { RenderedPage };
 
@@ -56,7 +57,8 @@ export async function renderPdfPage(
     await page.render({
       canvasContext: context,
       viewport,
-      canvas: canvas as any,
+      canvas: canvas as unknown as HTMLCanvasElement,
+      intent: 'print',
     }).promise;
 
     const dataUrl = format === 'png'
@@ -74,8 +76,7 @@ export async function renderPdfPage(
     throw err;
   } finally {
     // Release canvas memory immediately
-    canvas.width = 0;
-    canvas.height = 0;
+    disposeCanvas(canvas);
     loadingTask.destroy();
   }
 }
@@ -110,7 +111,8 @@ export async function renderAllPdfPages(
         await page.render({
           canvasContext: context,
           viewport,
-          canvas: canvas as any,
+          canvas: canvas as unknown as HTMLCanvasElement,
+          intent: 'print',
         }).promise;
 
         const dataUrl = format === 'png'
@@ -125,8 +127,7 @@ export async function renderAllPdfPages(
         });
 
         // Release canvas memory after each page
-        canvas.width = 0;
-        canvas.height = 0;
+        disposeCanvas(canvas);
       }
 
       if (onProgress) {

@@ -296,3 +296,73 @@ export function disposeCanvas(canvas: HTMLCanvasElement | null | undefined): voi
   }
 }
 
+/**
+ * Estimate realistic perspective dimensions for a quadrilateral,
+ * avoiding distortion from angular perspective foreshortening.
+ */
+export function estimatePerspectiveDimensions(
+  quad: CornerQuad,
+  maxDim: number = 2560
+): { width: number; height: number } {
+  const { topLeft, topRight, bottomRight, bottomLeft } = quad;
+
+  const topW = euclideanDistance(topLeft, topRight);
+  const botW = euclideanDistance(bottomLeft, bottomRight);
+  const leftH = euclideanDistance(topLeft, bottomLeft);
+  const rightH = euclideanDistance(topRight, bottomRight);
+
+  // Maximum measured widths and heights
+  let targetWidth = Math.max(120, Math.round(Math.max(topW, botW)));
+  let targetHeight = Math.max(120, Math.round(Math.max(leftH, rightH)));
+
+  // Bound maximum dimensions to avoid memory overload on mobile
+  if (targetWidth > maxDim || targetHeight > maxDim) {
+    const scale = Math.min(maxDim / targetWidth, maxDim / targetHeight);
+    targetWidth = Math.max(120, Math.round(targetWidth * scale));
+    targetHeight = Math.max(120, Math.round(targetHeight * scale));
+  }
+
+  return { width: targetWidth, height: targetHeight };
+}
+
+/**
+ * Convert screen client coordinates to image natural coordinates safely
+ */
+export function screenToNatural(
+  clientX: number,
+  clientY: number,
+  displayRect: { left: number; top: number; width: number; height: number },
+  naturalSize: { width: number; height: number }
+): Point {
+  if (displayRect.width <= 0 || displayRect.height <= 0) {
+    return { x: 0, y: 0 };
+  }
+  const relX = clientX - displayRect.left;
+  const relY = clientY - displayRect.top;
+  const clampedX = Math.max(0, Math.min(displayRect.width, relX));
+  const clampedY = Math.max(0, Math.min(displayRect.height, relY));
+
+  return {
+    x: (clampedX / displayRect.width) * naturalSize.width,
+    y: (clampedY / displayRect.height) * naturalSize.height,
+  };
+}
+
+/**
+ * Convert image natural coordinates to screen display coordinates safely
+ */
+export function naturalToScreen(
+  point: Point,
+  displayRect: { width: number; height: number },
+  naturalSize: { width: number; height: number }
+): Point {
+  if (naturalSize.width <= 0 || naturalSize.height <= 0) {
+    return { x: 0, y: 0 };
+  }
+  return {
+    x: (point.x / naturalSize.width) * displayRect.width,
+    y: (point.y / naturalSize.height) * displayRect.height,
+  };
+}
+
+

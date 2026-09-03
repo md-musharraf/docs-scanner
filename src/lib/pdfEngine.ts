@@ -170,14 +170,29 @@ export async function imagesToPDF(
         pageWidth = PageSizes.Letter[0];
         pageHeight = PageSizes.Letter[1];
       } else if (options.pageSize === 'fit') {
-        pageWidth = imgWidth + options.margin * 2;
-        pageHeight = imgHeight + options.margin * 2;
+        // Normalize points to standard 150 DPI to prevent 50-inch wide pages
+        const pointScale = imgWidth > 1200 || imgHeight > 1200 ? 72 / 150 : 1.0;
+        pageWidth = Math.round(imgWidth * pointScale + options.margin * 2);
+        pageHeight = Math.round(imgHeight * pointScale + options.margin * 2);
       }
 
-      if (options.pageSize !== 'fit' && options.orientation === 'landscape') {
-        const temp = pageWidth;
-        pageWidth = pageHeight;
-        pageHeight = temp;
+      const isLandscapeImage = imgWidth > imgHeight;
+      if (options.pageSize !== 'fit') {
+        if (options.orientation === 'auto') {
+          if (isLandscapeImage && pageWidth < pageHeight) {
+            const temp = pageWidth;
+            pageWidth = pageHeight;
+            pageHeight = temp;
+          }
+        } else if (options.orientation === 'landscape' && pageWidth < pageHeight) {
+          const temp = pageWidth;
+          pageWidth = pageHeight;
+          pageHeight = temp;
+        } else if (options.orientation === 'portrait' && pageWidth > pageHeight) {
+          const temp = pageWidth;
+          pageWidth = pageHeight;
+          pageHeight = temp;
+        }
       }
 
       const page = pdfDoc.addPage([pageWidth, pageHeight]);
@@ -423,6 +438,9 @@ export async function compressPDFDocument(
   logger.time('CompressPDF');
   try {
     const scale = options.scale || 1.0;
+    const sourcePdf = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const originalPages = sourcePdf.getPages();
+
     const pages = await renderAllPdfPages(pdfBuffer, scale, onProgress, 'jpeg');
 
     if (pages.length === 0) {
@@ -431,14 +449,21 @@ export async function compressPDFDocument(
 
     const compressedPdf = await PDFDocument.create();
 
-    for (const page of pages) {
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
       const jpgImage = await compressedPdf.embedJpg(page.dataUrl);
-      const pdfPage = compressedPdf.addPage([page.width, page.height]);
+
+      // Preserve original physical page dimensions in points
+      const origSize = originalPages[i]
+        ? originalPages[i].getSize()
+        : { width: page.width / scale, height: page.height / scale };
+
+      const pdfPage = compressedPdf.addPage([origSize.width, origSize.height]);
       pdfPage.drawImage(jpgImage, {
         x: 0,
         y: 0,
-        width: page.width,
-        height: page.height,
+        width: origSize.width,
+        height: origSize.height,
       });
     }
 

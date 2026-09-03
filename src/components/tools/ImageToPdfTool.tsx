@@ -16,6 +16,7 @@ import {
   triggerHaptic,
 } from '../../utils/formatters';
 import { rotateImageCanvas, disposeCanvas } from '../../utils/geometry';
+import { fileToDataUrl } from '../../utils/fileUtils';
 import { loadImageElement } from '../../lib/imageFilters';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
@@ -55,23 +56,16 @@ export const ImageToPdfTool: React.FC<ImageToPdfToolProps> = ({ onDocumentSaved 
 
     try {
       const loadedItems: ImageFileItem[] = await Promise.all(
-        imgFiles.map(
-          (file) =>
-            new Promise<ImageFileItem>((resolve) => {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                const dataUrl = e.target?.result as string;
-                resolve({
-                  id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                  file,
-                  dataUrl,
-                  name: file.name,
-                  size: file.size,
-                });
-              };
-              reader.readAsDataURL(file);
-            })
-        )
+        imgFiles.map(async (file) => {
+          const dataUrl = await fileToDataUrl(file);
+          return {
+            id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            file,
+            dataUrl,
+            name: file.name,
+            size: file.size,
+          };
+        })
       );
 
       setImages((prev) => [...prev, ...loadedItems]);

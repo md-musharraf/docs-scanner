@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { logger } from '../core/logger';
+import { blobToBase64, uint8ArrayToBase64, bufferToBlob } from '../utils/fileUtils';
 
 /**
  * Native Bridge Service for cross-platform file saving, sharing, and native features
@@ -27,12 +28,7 @@ export class NativeBridge {
 
     try {
       if (this.isNative()) {
-        let base64Data: string;
-        if (data instanceof Blob) {
-          base64Data = await this.blobToBase64(data);
-        } else {
-          base64Data = this.uint8ArrayToBase64(data);
-        }
+        const base64Data = data instanceof Blob ? await blobToBase64(data) : uint8ArrayToBase64(data);
 
         // Clean base64 prefix if present
         const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
@@ -48,7 +44,7 @@ export class NativeBridge {
         return { success: true, path: result.uri, message: `Saved to Documents/${filename}` };
       } else {
         // Web fallback download
-        const blob = data instanceof Blob ? data : new Blob([data as any], { type: mimeType });
+        const blob = data instanceof Blob ? data : bufferToBlob(data, mimeType);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -63,7 +59,7 @@ export class NativeBridge {
       logger.error('NativeBridge', 'Error saving file', err);
       // Fallback to web download if native fails
       try {
-        const blob = data instanceof Blob ? data : new Blob([data as any], { type: mimeType });
+        const blob = data instanceof Blob ? data : bufferToBlob(data, mimeType);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -89,14 +85,7 @@ export class NativeBridge {
   ): Promise<boolean> {
     try {
       if (this.isNative()) {
-        // Write to cache directory first for native sharing
-        let base64Data: string;
-        if (data instanceof Blob) {
-          base64Data = await this.blobToBase64(data);
-        } else {
-          base64Data = this.uint8ArrayToBase64(data);
-        }
-
+        const base64Data = data instanceof Blob ? await blobToBase64(data) : uint8ArrayToBase64(data);
         const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
 
         const writeResult = await Filesystem.writeFile({
@@ -113,7 +102,7 @@ export class NativeBridge {
         });
         return true;
       } else if (navigator.share) {
-        const blob = data instanceof Blob ? data : new Blob([data as any], { type: 'application/pdf' });
+        const blob = data instanceof Blob ? data : bufferToBlob(data, 'application/pdf');
         const file = new File([blob], filename, { type: 'application/pdf' });
         await navigator.share({
           files: [file],
@@ -126,25 +115,5 @@ export class NativeBridge {
       logger.warn('NativeBridge', 'Share cancelled or not supported', err);
       return false;
     }
-  }
-
-  private static blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  private static uint8ArrayToBase64(bytes: Uint8Array): string {
-    let binary = '';
-    const len = bytes.byteLength;
-    const chunkSize = 8192; // Chunking to prevent call stack overflow on large buffers
-    for (let i = 0; i < len; i += chunkSize) {
-      const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
-      binary += String.fromCharCode.apply(null, chunk as any);
-    }
-    return window.btoa(binary);
   }
 }

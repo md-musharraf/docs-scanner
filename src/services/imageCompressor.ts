@@ -1,5 +1,7 @@
 import { logger } from '../core/logger';
 import { loadImageElement } from '../lib/imageFilters';
+import { blobToDataUrl } from '../utils/fileUtils';
+import { disposeCanvas } from '../utils/geometry';
 
 export interface ResizeCompressOptions {
   targetKB?: number;
@@ -56,40 +58,29 @@ export async function compressImageToTargetKB(
   let currentWidth = img.naturalWidth;
   let currentHeight = img.naturalHeight;
 
-  // Initial dimension capping based on extreme size constraints
-  if (targetKB <= 15) {
-    const maxDim = 640;
-    if (currentWidth > maxDim || currentHeight > maxDim) {
-      const s = Math.min(maxDim / currentWidth, maxDim / currentHeight);
-      currentWidth = Math.round(currentWidth * s);
-      currentHeight = Math.round(currentHeight * s);
-    }
-  } else if (targetKB <= 50) {
-    const maxDim = 1024;
-    if (currentWidth > maxDim || currentHeight > maxDim) {
-      const s = Math.min(maxDim / currentWidth, maxDim / currentHeight);
-      currentWidth = Math.round(currentWidth * s);
-      currentHeight = Math.round(currentHeight * s);
-    }
-  } else if (targetKB <= 150) {
-    const maxDim = 1440;
-    if (currentWidth > maxDim || currentHeight > maxDim) {
-      const s = Math.min(maxDim / currentWidth, maxDim / currentHeight);
-      currentWidth = Math.round(currentWidth * s);
-      currentHeight = Math.round(currentHeight * s);
-    }
+  // Estimate maximum pixel budget based on target bytes
+  // Standard JPEG density is ~0.20-0.35 bytes/pixel at good quality
+  const targetPixels = Math.max(120 * 120, Math.round(targetBytes / 0.22));
+  const currentPixels = currentWidth * currentHeight;
+  if (currentPixels > targetPixels) {
+    const s = Math.sqrt(targetPixels / currentPixels);
+    currentWidth = Math.max(100, Math.round(currentWidth * s));
+    currentHeight = Math.max(100, Math.round(currentHeight * s));
   }
 
   const canvas = document.createElement('canvas');
-  canvas.width = currentWidth;
-  canvas.height = currentHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D context not available');
 
-  // Fill pure white background for transparent image safety
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, currentWidth, currentHeight);
-  ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
+  const renderToCanvas = (w: number, h: number) => {
+    canvas.width = w;
+    canvas.height = h;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+  };
+
+  renderToCanvas(currentWidth, currentHeight);
 
   const getBlob = (q: number): Promise<Blob> =>
     new Promise((resolve, reject) => {
@@ -104,12 +95,12 @@ export async function compressImageToTargetKB(
     });
 
   // Binary Search for optimal compression quality
-  let minQ = 0.02;
+  let minQ = 0.05;
   let maxQ = 0.96;
   let bestBlob: Blob | null = null;
   let bestQuality = 0.5;
 
-  for (let iter = 0; iter < 6; iter++) {
+  for (let iter = 0; iter < 7; iter++) {
     const testQ = (minQ + maxQ) / 2;
     const blob = await getBlob(testQ);
 
@@ -122,33 +113,28 @@ export async function compressImageToTargetKB(
     }
   }
 
-  // If still exceeding targetBytes (even at lowest quality), downscale dimensions further
+  // If still exceeding targetBytes, scale down dimensions smoothly while maintaining reasonable quality
   if (!bestBlob || bestBlob.size > targetBytes) {
-    let scaleFactor = 0.85;
-    const testQuality = bestBlob ? Math.max(0.1, bestQuality) : Math.max(0.1, minQ);
+    let scaleFactor = 0.88;
+    const testQuality = bestBlob ? Math.max(0.2, bestQuality) : 0.45;
     for (let iter = 0; iter < 5; iter++) {
       currentWidth = Math.max(80, Math.round(currentWidth * scaleFactor));
       currentHeight = Math.max(80, Math.round(currentHeight * scaleFactor));
-      canvas.width = currentWidth;
-      canvas.height = currentHeight;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, currentWidth, currentHeight);
-      ctx.drawImage(img, 0, 0, currentWidth, currentHeight);
+      renderToCanvas(currentWidth, currentHeight);
 
       const blob = await getBlob(testQuality);
       bestBlob = blob;
       if (blob.size <= targetBytes) {
         break;
       }
-      scaleFactor *= 0.8;
+      scaleFactor *= 0.85;
     }
   }
 
   const finalBlob = bestBlob || (await getBlob(0.1));
   const dataUrl = await blobToDataUrl(finalBlob);
 
-  canvas.width = 0;
-  canvas.height = 0;
+  disposeCanvas(canvas);
 
   const reductionPercentage =
     originalSizeBytes > 0
@@ -267,8 +253,7 @@ export async function resizeAndCompressImage(
 
   const dataUrl = await blobToDataUrl(blob);
 
-  canvas.width = 0;
-  canvas.height = 0;
+  disposeCanvas(canvas);
 
   const reductionPercentage =
     originalSizeBytes > 0
@@ -285,13 +270,4 @@ export async function resizeAndCompressImage(
     reductionPercentage,
     format,
   };
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
 }

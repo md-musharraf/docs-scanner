@@ -6,6 +6,8 @@ import {
   solvePerspectiveTransform,
   clampPoint,
   polygonArea,
+  estimatePerspectiveDimensions,
+  disposeCanvas,
 } from '../utils/geometry';
 import { APP_CONFIG } from '../core/constants';
 import { logger } from '../core/logger';
@@ -114,21 +116,38 @@ export function autoDetectDocumentCorners(
     const maxDist = Math.hypot(procW, procH) / 2;
 
     let foundEdge: Point | null = null;
-    let maxLocalGrad = 0;
 
-    // Scan along ray outwards from center
-    for (let step = 15; step < maxDist; step += 1.5) {
+    // Scan inward from outer perimeter to latch onto document edge, then outward fallback
+    for (let step = maxDist - 4; step >= 15; step -= 1.5) {
       const px = Math.round(centerX + cosA * step);
       const py = Math.round(centerY + sinA * step);
 
       if (px <= 2 || px >= procW - 3 || py <= 2 || py >= procH - 3) {
-        break;
+        continue;
       }
 
       const gVal = gradient[py * procW + px];
-      if (gVal > gradThreshold && gVal > maxLocalGrad) {
-        maxLocalGrad = gVal;
+      if (gVal > gradThreshold) {
         foundEdge = { x: px, y: py };
+        break;
+      }
+    }
+
+    if (!foundEdge) {
+      let maxLocalGrad = 0;
+      for (let step = 15; step < maxDist; step += 1.5) {
+        const px = Math.round(centerX + cosA * step);
+        const py = Math.round(centerY + sinA * step);
+
+        if (px <= 2 || px >= procW - 3 || py <= 2 || py >= procH - 3) {
+          break;
+        }
+
+        const gVal = gradient[py * procW + px];
+        if (gVal > gradThreshold && gVal > maxLocalGrad) {
+          maxLocalGrad = gVal;
+          foundEdge = { x: px, y: py };
+        }
       }
     }
 
@@ -137,9 +156,8 @@ export function autoDetectDocumentCorners(
     }
   }
 
-  // Release processing canvas
-  procCanvas.width = 0;
-  procCanvas.height = 0;
+  // Release processing canvas safely
+  disposeCanvas(procCanvas);
 
   // 5. If radial boundary produced enough points, partition into 4 quadrants
   let detectedQuad: CornerQuad | null = null;
@@ -302,22 +320,11 @@ export function warpPerspectiveCrop(
   logger.time('WarpPerspective');
   const { topLeft, topRight, bottomRight, bottomLeft } = corners;
 
-  // Calculate destination dimensions from quad edges
-  const topWidth = euclideanDistance(topLeft, topRight);
-  const bottomWidth = euclideanDistance(bottomLeft, bottomRight);
-  const leftHeight = euclideanDistance(topLeft, bottomLeft);
-  const rightHeight = euclideanDistance(topRight, bottomRight);
-
-  let targetWidth = Math.max(300, Math.round(Math.max(topWidth, bottomWidth)));
-  let targetHeight = Math.max(300, Math.round(Math.max(leftHeight, rightHeight)));
-
-  // Bound max dimensions to protect mobile memory
-  const maxDim = APP_CONFIG.maxProcessingDimension;
-  if (targetWidth > maxDim || targetHeight > maxDim) {
-    const scale = Math.min(maxDim / targetWidth, maxDim / targetHeight);
-    targetWidth = Math.round(targetWidth * scale);
-    targetHeight = Math.round(targetHeight * scale);
-  }
+  // Calculate destination dimensions from quad edges using perspective estimation
+  const { width: targetWidth, height: targetHeight } = estimatePerspectiveDimensions(
+    corners,
+    APP_CONFIG.maxProcessingDimension
+  );
 
   const dstCorners: Point[] = [
     { x: 0, y: 0 },
@@ -347,14 +354,18 @@ export function warpPerspectiveCrop(
   const outData = outCtx.createImageData(targetWidth, targetHeight);
   const outPixels = outData.data;
 
-  // High quality bilinear interpolation warp with edge clamping
+  // High quality bilinear interpolation warp with edge clamping and optimized row terms
   for (let y = 0; y < targetHeight; y++) {
     const yTargetOffset = y * targetWidth;
+    const h0y = hInv[1] * y + hInv[2];
+    const h1y = hInv[4] * y + hInv[5];
+    const h2y = hInv[7] * y + hInv[8];
+
     for (let x = 0; x < targetWidth; x++) {
-      const denom = hInv[6] * x + hInv[7] * y + hInv[8];
+      const denom = hInv[6] * x + h2y;
       const invDenom = denom !== 0 ? 1 / denom : 1;
-      const srcX = (hInv[0] * x + hInv[1] * y + hInv[2]) * invDenom;
-      const srcY = (hInv[3] * x + hInv[4] * y + hInv[5]) * invDenom;
+      const srcX = (hInv[0] * x + h0y) * invDenom;
+      const srcY = (hInv[3] * x + h1y) * invDenom;
 
       // Clamped bilinear coordinates
       const clampedX = Math.max(0, Math.min(srcW - 1.001, srcX));

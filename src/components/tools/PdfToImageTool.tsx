@@ -8,6 +8,7 @@ import { renderAllPdfPages } from '../../lib/pdfRenderer';
 import type { RenderedPage } from '../../core/types';
 import { downloadFile } from '../../lib/storage';
 import { triggerCelebration, triggerHaptic } from '../../utils/formatters';
+import { dataUrlToBlob } from '../../utils/fileUtils';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -60,7 +61,7 @@ export const PdfToImageTool: React.FC = () => {
     triggerHaptic(20);
     setScale(newScale);
     if (file) {
-      await processPdfToImages(file, newScale);
+      await processPdfToImages(file, newScale, format);
     }
   };
 
@@ -71,8 +72,7 @@ export const PdfToImageTool: React.FC = () => {
     const filename = `${baseName}_page_${page.pageNumber}.${ext}`;
 
     try {
-      const res = await fetch(page.dataUrl);
-      const blob = await res.blob();
+      const blob = dataUrlToBlob(page.dataUrl);
       await downloadFile(blob, filename, `image/${format}`);
       showToast(`Saved ${filename}`, 'success');
     } catch (err) {
@@ -90,8 +90,7 @@ export const PdfToImageTool: React.FC = () => {
       const ext = format === 'png' ? 'png' : 'jpg';
 
       for (const page of renderedPages) {
-        const res = await fetch(page.dataUrl);
-        const blob = await res.blob();
+        const blob = dataUrlToBlob(page.dataUrl);
         zip.file(`${baseName}_page_${page.pageNumber}.${ext}`, blob);
       }
 

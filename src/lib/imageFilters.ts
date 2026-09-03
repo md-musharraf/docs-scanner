@@ -1,6 +1,7 @@
 import type { ScannerFilter, ImageEnhanceOptions } from '../core/types';
 import { APP_CONFIG } from '../core/constants';
 import { logger } from '../core/logger';
+import { disposeCanvas } from '../utils/geometry';
 
 export type { ScannerFilter, ImageEnhanceOptions };
 
@@ -124,19 +125,22 @@ function applySauvolaMagicBW(
       const stdDev = Math.sqrt(variance);
 
       // Sauvola formula: T = mean * (1 + k * (stdDev / R - 1))
-      const threshold = Math.max(35, Math.min(235, mean * (1 + k * (stdDev / R - 1))));
+      const threshold = Math.max(30, Math.min(235, mean * (1 + k * (stdDev / R - 1))));
 
       const idx = (yOffset + x) * 4;
       const currentGray = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
 
       let val = 255;
-      if (currentGray < threshold) {
+      // If region has high mean and near-zero variance, it's uniform clean paper
+      if (mean > 145 && stdDev < 7.5) {
+        val = 255;
+      } else if (currentGray < threshold) {
         // Smooth anti-aliased dark ink transition
         const diff = threshold - currentGray;
-        if (diff > 25) {
+        if (diff > 18) {
           val = 0;
         } else {
-          val = Math.max(0, Math.min(45, (25 - diff) * 2));
+          val = Math.max(0, Math.min(45, Math.round((18 - diff) * 2.5)));
         }
       }
 
@@ -210,16 +214,56 @@ export async function applyImageFilter(
     normalizeIlluminationAndShadows(data, targetWidth, targetHeight);
   }
 
-  // 2. Brightness & Contrast adjustments
-  if (opts.brightness !== 0 || opts.contrast !== 0) {
-    const b = (opts.brightness || 0) * 1.5;
-    const c = opts.contrast || 0;
-    const factor = (259 * (c + 255)) / (255 * (259 - c));
+/**
+ * Fast Look-Up Table (LUT) for brightness & contrast adjustment
+ */
+function buildBrightnessContrastLut(brightness: number, contrast: number): Uint8Array {
+  const lut = new Uint8Array(256);
+  const b = brightness * 1.5;
+  const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.min(255, Math.max(0, Math.round(factor * (i + b - 128) + 128)));
+  }
+  return lut;
+}
 
+/**
+ * Genuine 3x3 Laplacian Unsharp Masking for crisp document text & line enhancement
+ */
+function applyUnsharpMask(data: Uint8ClampedArray, width: number, height: number, amount: number = 0.55) {
+  const copy = new Uint8ClampedArray(data);
+  const w4 = width * 4;
+
+  for (let y = 1; y < height - 1; y++) {
+    const row = y * w4;
+    const prevRow = (y - 1) * w4;
+    const nextRow = (y + 1) * w4;
+
+    for (let x = 1; x < width - 1; x++) {
+      const idx = row + (x * 4);
+      for (let c = 0; c < 3; c++) {
+        const center = copy[idx + c];
+        const blur = (
+          copy[prevRow + (x * 4) + c] +
+          copy[nextRow + (x * 4) + c] +
+          copy[row + ((x - 1) * 4) + c] +
+          copy[row + ((x + 1) * 4) + c]
+        ) >> 2;
+
+        const sharp = center + (center - blur) * amount;
+        data[idx + c] = Math.min(255, Math.max(0, sharp | 0));
+      }
+    }
+  }
+}
+
+  // 2. High-speed LUT-based Brightness & Contrast adjustments
+  if (opts.brightness !== 0 || opts.contrast !== 0) {
+    const lut = buildBrightnessContrastLut(opts.brightness || 0, opts.contrast || 0);
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = Math.min(255, Math.max(0, factor * (data[i] + b - 128) + 128));
-      data[i + 1] = Math.min(255, Math.max(0, factor * (data[i + 1] + b - 128) + 128));
-      data[i + 2] = Math.min(255, Math.max(0, factor * (data[i + 2] + b - 128) + 128));
+      data[i] = lut[data[i]];
+      data[i + 1] = lut[data[i + 1]];
+      data[i + 2] = lut[data[i + 2]];
     }
   }
 
@@ -233,20 +277,18 @@ export async function applyImageFilter(
       let g = data[i + 1];
       let b = data[i + 2];
 
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-
-      // Color saturation measure: max - min difference
+      const lum = (r * 77 + g * 150 + b * 29) >> 8;
       const maxC = Math.max(r, g, b);
       const minC = Math.min(r, g, b);
       const chroma = maxC - minC;
 
-      if (lum > 165 && chroma < 28) {
-        // Whitish paper background -> boost to pure clean paper white
-        const factor = (lum - 165) / 90;
+      if (lum > 155 && chroma < 25) {
+        // Whitish paper background -> smoothly transition to pure clean paper white
+        const factor = Math.min(1, (lum - 155) / 80);
         r = Math.min(255, r + (255 - r) * factor);
         g = Math.min(255, g + (255 - g) * factor);
         b = Math.min(255, b + (255 - b) * factor);
-      } else if (chroma >= 28) {
+      } else if (chroma >= 25) {
         // Colored ink / stamps (blue pen, red stamp, green signature) -> boost vibrancy
         const avg = (r + g + b) / 3;
         r = Math.min(255, Math.max(0, avg + (r - avg) * 1.35));
@@ -264,31 +306,52 @@ export async function applyImageFilter(
       data[i + 2] = b | 0;
     }
   } else if (opts.filter === 'grayscale') {
+    // Adaptive percentile auto-contrast monochrome
+    const hist = new Int32Array(256);
+    const totalPixels = targetWidth * targetHeight;
     for (let i = 0; i < data.length; i += 4) {
-      const gray = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-      // Linear stretch
-      const stretched = Math.min(255, Math.max(0, (gray - 20) * 1.18)) | 0;
-      data[i] = stretched;
-      data[i + 1] = stretched;
-      data[i + 2] = stretched;
+      const grayVal = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      hist[grayVal]++;
+    }
+
+    const pLow = totalPixels * 0.015;
+    const pHigh = totalPixels * 0.985;
+    let count = 0;
+    let minG = 0;
+    let maxG = 255;
+    for (let i = 0; i < 256; i++) {
+      count += hist[i];
+      if (count >= pLow && minG === 0) minG = i;
+      if (count >= pHigh) {
+        maxG = i;
+        break;
+      }
+    }
+    if (maxG <= minG) {
+      minG = 0;
+      maxG = 255;
+    }
+    const range = Math.max(1, maxG - minG);
+    const grayLut = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      grayLut[i] = Math.min(255, Math.max(0, Math.round(((i - minG) * 255) / range)));
+    }
+
+    for (let i = 0; i < data.length; i += 4) {
+      const g = grayLut[(data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8];
+      data[i] = g;
+      data[i + 1] = g;
+      data[i + 2] = g;
     }
   } else if (opts.filter === 'sharp') {
-    for (let i = 0; i < data.length; i += 4) {
-      const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-      const factor = lum < 128 ? 0.76 : 1.24;
-
-      data[i] = Math.min(255, (data[i] * factor) | 0);
-      data[i + 1] = Math.min(255, (data[i + 1] * factor) | 0);
-      data[i + 2] = Math.min(255, (data[i + 2] * factor) | 0);
-    }
+    applyUnsharpMask(data, targetWidth, targetHeight, 0.6);
   }
 
   ctx.putImageData(imgData, 0, 0);
   const result = canvas.toDataURL('image/jpeg', opts.quality || APP_CONFIG.defaultJpegQuality);
 
-  // Clean up canvas memory
-  canvas.width = 0;
-  canvas.height = 0;
+  // Clean up canvas memory safely
+  disposeCanvas(canvas);
 
   logger.timeEnd('Filters', 'ApplyImageFilter');
   return result;

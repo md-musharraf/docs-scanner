@@ -186,7 +186,10 @@ export const CropModal: React.FC<CropModalProps> = ({
     loupe.width = loupeSize;
     loupe.height = loupeSize;
 
-    lCtx.clearRect(0, 0, loupeSize, loupeSize);
+    lCtx.fillStyle = '#0f172a';
+    lCtx.fillRect(0, 0, loupeSize, loupeSize);
+    lCtx.imageSmoothingEnabled = true;
+    lCtx.imageSmoothingQuality = 'high';
 
     // Draw zoomed source section
     const sourceRadius = (loupeSize / zoom) / 2;
@@ -262,8 +265,8 @@ export const CropModal: React.FC<CropModalProps> = ({
     }
     triggerHaptic(20);
     const startPos = {
-      x: toNaturalX(e.clientX - displaySize.left),
-      y: toNaturalY(e.clientY - displaySize.top),
+      x: toNaturalX(e.clientX),
+      y: toNaturalY(e.clientY),
     };
 
     setDragTarget({
@@ -282,11 +285,8 @@ export const CropModal: React.FC<CropModalProps> = ({
     const clientY = e.clientY;
     setDragClientPos({ x: clientX, y: clientY });
 
-    const dispX = clientX - displaySize.left;
-    const dispY = clientY - displaySize.top;
-
-    const natX = toNaturalX(dispX);
-    const natY = toNaturalY(dispY);
+    const natX = toNaturalX(clientX);
+    const natY = toNaturalY(clientY);
 
     if (dragTarget.type === 'corner') {
       const clamped = clampPoint({ x: natX, y: natY }, naturalSize.width, naturalSize.height);

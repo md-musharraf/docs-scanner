@@ -29,6 +29,7 @@ import type { RenderedPage, PageNumberPosition } from '../../core/types';
 import { saveDocumentLocally } from '../../lib/storage';
 import { PdfViewerModal } from '../common/PdfViewerModal';
 import { ensurePdfExtension, triggerCelebration, triggerHaptic, moveArrayItem } from '../../utils/formatters';
+import { generateDocumentThumbnail } from '../../utils/fileUtils';
 import { useToast } from '../../hooks/useToast';
 import { logger } from '../../core/logger';
 
@@ -264,11 +265,13 @@ export const PdfTools: React.FC<PdfToolsProps> = ({ onDocumentSaved }) => {
         finalPageCount = Math.max(1, pageCount - uniquePages.length);
       }
 
+      const thumbnail = await generateDocumentThumbnail(outputBytes);
+
       await saveDocumentLocally({
         name: outputName,
         sizeBytes: outputBytes.byteLength,
         pageCount: finalPageCount,
-        thumbnailUrl: '',
+        thumbnailUrl: thumbnail,
         category: 'tools',
         data: outputBytes,
       });

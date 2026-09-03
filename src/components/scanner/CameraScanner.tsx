@@ -22,6 +22,7 @@ import {
   triggerHaptic,
 } from '../../utils/formatters';
 import { rotateImageCanvas, disposeCanvas } from '../../utils/geometry';
+import { fileToDataUrl } from '../../utils/fileUtils';
 import { DocNameInput } from '../common/DocNameInput';
 import { ActionButton } from '../common/ActionButton';
 import { imagesToPDF } from '../../lib/pdfEngine';
@@ -195,14 +196,16 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
 
     if (fileList.length === 1) {
       // Single file -> Open interactive crop modal
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const rawUrl = event.target?.result as string;
-        setEditingPageIndex(null);
-        setCurrentRawCapture(rawUrl);
-        setCropModalOpen(true);
-      };
-      reader.readAsDataURL(fileList[0]);
+      fileToDataUrl(fileList[0])
+        .then((rawUrl) => {
+          setEditingPageIndex(null);
+          setCurrentRawCapture(rawUrl);
+          setCropModalOpen(true);
+        })
+        .catch((err) => {
+          logger.error('CameraScanner', 'Error reading image', err);
+          showToast('Failed to load image', 'error');
+        });
     } else {
       // Multi-file batch import -> Auto-process and add all directly
       showToast(`Importing ${fileList.length} photos...`, 'info');
@@ -210,11 +213,7 @@ export const CameraScanner: React.FC<CameraScannerProps> = ({ onDocumentSaved })
         const newBatch: ScannedPageItem[] = [];
 
         for (const file of fileList) {
-          const rawUrl = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => resolve(ev.target?.result as string);
-            reader.readAsDataURL(file);
-          });
+          const rawUrl = await fileToDataUrl(file);
 
           const img = await loadImageElement(rawUrl);
           const canvas = document.createElement('canvas');
